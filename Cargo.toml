@@ -5,8 +5,9 @@ authors = ["Ben Weinstein-Raun <root@benwr.net>"]
 edition = "2018"
 
 [dependencies]
-bromberg_sl2 = "0.2.0"
+bromberg_sl2 = "0.3.0"
 num-bigint = "0.3.1"
 
 [dev-dependencies]
 quickcheck = "0.9.2"
+rand = "0.7.3"
