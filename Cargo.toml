@@ -5,7 +5,7 @@ authors = ["Ben Weinstein-Raun <root@benwr.net>"]
 edition = "2018"
 
 [dependencies]
-blake3 = "0.3.7"
+bromberg_sl2 = "0.2.0"
 num-bigint = "0.3.1"
 
 [dev-dependencies]

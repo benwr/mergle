@@ -1,21 +1,34 @@
 use std::rc;
 use std::cmp::Ordering;
+use std::collections::hash_map::*;
 
-use blake3;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use bromberg_sl2::*;
 
 use num_bigint::BigUint;
 
-type Rc<T> = rc::Rc<T>;
+
+enum PrefixResult<T> {
+    LessThan,
+    PrefixOf(Mergle<T>),
+    Equal,
+    PrefixedBy(Mergle<T>),
+    GreaterThan,
+}
+
+pub type MemoizationTable<T> = HashMap<(HashMatrix, HashMatrix), PrefixResult<T>>;
 
 struct MergleInternalNode<T> {
-    height: usize,
-    hash: blake3::Hash,
-    children: Vec<Rc<MergleNode<T>>>,
+    hash: HashMatrix,
+    left: Rc<MergleNode<T>>,
+    right: Rc<MergleNode<T>>
 }
 
 struct MergleLeaf<T> {
-    content: Vec<T>,
-    hash: blake3::Hash,
+    content: T,
+    hash: bromberg_sl2::HashMatrix,
 }
 
 enum MergleNode<T> {
@@ -23,22 +36,45 @@ enum MergleNode<T> {
     Leaf(MergleLeaf<T>),
 }
 
-pub struct Mergle<T> {
-    root: MergleNode<T>,
+impl<T> MergleNode<T> {
+    fn bromberg_hash(&self) -> HashMatrix {
+        match self {
+            MergleNode::Internal(node) => node.hash,
+            MergleNode::Leaf(node) => node.hash
+        }
+    }
 }
 
-const CHUNK_MASK: usize = !0b111;
+pub struct Mergle<T> {
+    root: Rc<MergleNode<T>>,
+    table: Rc<RefCell<MemoizationTable<T>>>,
+}
 
-// hm, is there a principled way to choose this number?
-const WINDOW_SIZE: usize = 131;
+impl<T: AsRef<[u8]>> Mergle<T> {
+    pub fn singleton(t: T, table: Rc<RefCell<MemoizationTable<T>>>) -> Mergle<T> {
+        let h = hash(t.as_ref());
+        let node = MergleLeaf {
+            content: t,
+            hash: h
+        };
 
-impl<T> Mergle<T> {
-    pub fn singleton(t: T) -> Mergle<T> {
-        panic!()
+        Mergle {
+            root: Rc::new(MergleNode::Leaf(node)),
+            table: table,
+        }
     }
 
     pub fn merge(&self, other: &Self) -> Self {
-        panic!()
+        let hash = self.root.bromberg_hash() * other.root.bromberg_hash();
+        let node = MergleInternalNode {
+            hash: hash,
+            left: Rc::clone(&self.root),
+            right: Rc::clone(&other.root)
+        };
+        Mergle {
+            root: Rc::new(MergleNode::Internal(node)),
+            table: Rc::clone(&self.table)
+        }
     }
 }
 
