@@ -6,7 +6,8 @@ use std::rc::Rc;
 
 use bromberg_sl2::*;
 
-pub enum PrefixResult<T> {
+#[derive(Clone)]
+pub enum PrefixResult<T: Clone + Ord + BrombergHashable> {
     LessThan,
     PrefixOf(Mergle<T>),
     Equal,
@@ -14,13 +15,13 @@ pub enum PrefixResult<T> {
     GreaterThan,
 }
 
-impl<T: Ord + BrombergHashable> PrefixResult<T> {
+impl<T: Clone + Ord + BrombergHashable> PrefixResult<T> {
     fn inverse(&self) -> PrefixResult<T> {
         match self {
             PrefixResult::LessThan => PrefixResult::GreaterThan,
-            PrefixResult::PrefixOf(suffix) => PrefixResult::PrefixedBy(suffix.copy()),
+            PrefixResult::PrefixOf(suffix) => PrefixResult::PrefixedBy(suffix.clone()),
             PrefixResult::Equal => PrefixResult::Equal,
-            PrefixResult::PrefixedBy(suffix) => PrefixResult::PrefixOf(suffix.copy()),
+            PrefixResult::PrefixedBy(suffix) => PrefixResult::PrefixOf(suffix.clone()),
             PrefixResult::GreaterThan => PrefixResult::LessThan,
         }
     }
@@ -54,12 +55,22 @@ impl<T> BrombergHashable for MergleNode<T> {
     }
 }
 
-pub struct Mergle<T> {
+impl<T> MergleNode<T> {
+    fn values(&self) -> Vec<&T> {
+        match self {
+            MergleNode::Internal(node) => [node.left.values(), node.right.values()].concat(),
+            MergleNode::Leaf(leaf) => vec![&leaf.content],
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Mergle<T: Clone + Ord + BrombergHashable> {
     root: Rc<MergleNode<T>>,
     table: Rc<RefCell<MemoizationTable<T>>>,
 }
 
-impl<T: Ord + BrombergHashable> Mergle<T> {
+impl<T: Clone + Ord + BrombergHashable> Mergle<T> {
     pub fn singleton(t: T, table: MemoizationTableRef<T>) -> Mergle<T> {
         let h = t.bromberg_hash();
         let node = MergleLeaf {
@@ -93,6 +104,10 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
         }
     }
 
+    fn values(&self) -> Vec<&T> {
+        self.root.values()
+    }
+
     fn from_node(node: Rc<MergleNode<T>>, table: MemoizationTableRef<T>) -> Mergle<T> {
         Mergle {
             root: node,
@@ -109,6 +124,18 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
     }
 
     pub fn prefix_cmp(&self, other: &Self) -> PrefixResult<T> {
+        let self_hash = self.root.bromberg_hash();
+        let other_hash = other.root.bromberg_hash();
+        {
+            // isolate immutable borrow
+            let table: &MemoizationTable<T> = &self.table.borrow();
+            if let Some(result) = table.get(&(self_hash, other_hash)) {
+                return (*result).clone();
+            } else if let Some(result) = table.get(&(other_hash, self_hash)) {
+                return result.inverse();
+            }
+        }
+
         let result = match self.root.as_ref() {
             MergleNode::Leaf(leaf) => match other.root.as_ref() {
                 MergleNode::Leaf(other_leaf) => Mergle::leaf_cmp(&leaf, &other_leaf),
@@ -129,25 +156,31 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
                 }
             }
         };
+
+        {
+            // isolate mutable borrow
+            let mut table = self.table.borrow_mut();
+            table.insert((self_hash, other_hash), result.clone());
+        }
         result
     }
 }
 
-impl<T: Ord + BrombergHashable> PartialEq for Mergle<T> {
+impl<T: Clone + Ord + BrombergHashable> PartialEq for Mergle<T> {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl<T: Ord + BrombergHashable> Eq for Mergle<T> {}
+impl<T: Clone + Ord + BrombergHashable> Eq for Mergle<T> {}
 
-impl<T: Ord + BrombergHashable> PartialOrd for Mergle<T> {
+impl<T: Clone + Ord + BrombergHashable> PartialOrd for Mergle<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T: Ord + BrombergHashable> Ord for Mergle<T> {
+impl<T: Clone + Ord + BrombergHashable> Ord for Mergle<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.prefix_cmp(other) {
             PrefixResult::LessThan => Ordering::Less,
@@ -165,7 +198,7 @@ mod tests {
     use quickcheck::*;
     use rand::Rng;
 
-    #[derive(PartialOrd, Ord, PartialEq, Eq)]
+    #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Debug)]
     struct U8(pub u8);
 
     impl BrombergHashable for U8 {
@@ -204,8 +237,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    quickcheck! {
+        fn test_eq(a : Vec<u8>) -> TestResult {
+            if a.is_empty() {
+                return TestResult::discard();
+            }
+            let table : MemoizationTableRef<U8> = Rc::new(RefCell::new(MemoizationTable::new()));
+            let a_mergle = make_mergle(&table, &a);
+            let b_mergle = make_mergle(&table, &a);
+            TestResult::from_bool((a_mergle.cmp(&b_mergle)) == Ordering::Equal)
+        }
     }
 }
