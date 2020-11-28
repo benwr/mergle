@@ -7,7 +7,7 @@ use std::rc::Rc;
 use bromberg_sl2::*;
 
 #[derive(Clone)]
-pub enum PrefixResult<T: Clone + Ord + BrombergHashable> {
+pub enum PrefixResult<T> {
     LessThan,
     PrefixOf(Mergle<T>),
     Equal,
@@ -15,7 +15,7 @@ pub enum PrefixResult<T: Clone + Ord + BrombergHashable> {
     GreaterThan,
 }
 
-impl<T: Clone + Ord + BrombergHashable> PrefixResult<T> {
+impl<T: Clone + BrombergHashable> PrefixResult<T> {
     fn inverse(&self) -> PrefixResult<T> {
         match self {
             PrefixResult::LessThan => PrefixResult::GreaterThan,
@@ -28,7 +28,33 @@ impl<T: Clone + Ord + BrombergHashable> PrefixResult<T> {
 }
 
 pub type MemoizationTable<T> = HashMap<(HashMatrix, HashMatrix), PrefixResult<T>>;
-pub type MemoizationTableRef<T> = Rc<RefCell<MemoizationTable<T>>>;
+
+#[derive(Clone)]
+pub struct MemoizationTableRef<T>(Rc<RefCell<MemoizationTable<T>>>);
+
+impl<T: Clone + BrombergHashable> MemoizationTableRef<T> {
+    pub fn new() -> Self {
+        MemoizationTableRef(Rc::new(RefCell::new(MemoizationTable::new())))
+    }
+
+    fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixResult<T>) {
+        let mut table = self.0.borrow_mut();
+        table.insert((a, b), r.clone());
+    }
+
+    fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<PrefixResult<T>> {
+        if a == b {
+            return Some(PrefixResult::Equal);
+        }
+        let table = self.0.borrow();
+        if let Some(result) = table.get(&(a, b)) {
+            return Some(result.clone());
+        } else if let Some(result) = table.get(&(b, a)) {
+            return Some(result.inverse());
+        }
+        None
+    }
+}
 
 struct MergleInternalNode<T> {
     hash: HashMatrix,
@@ -38,7 +64,7 @@ struct MergleInternalNode<T> {
 
 struct MergleLeaf<T> {
     content: T,
-    hash: bromberg_sl2::HashMatrix,
+    hash: HashMatrix,
 }
 
 enum MergleNode<T> {
@@ -65,10 +91,11 @@ impl<T> MergleNode<T> {
 }
 
 #[derive(Clone)]
-pub struct Mergle<T: Clone + Ord + BrombergHashable> {
+pub struct Mergle<T> {
     root: Rc<MergleNode<T>>,
-    table: Rc<RefCell<MemoizationTable<T>>>,
+    table: MemoizationTableRef<T>,
 }
+
 
 impl<T: Clone + Ord + BrombergHashable> Mergle<T> {
     pub fn singleton(t: T, table: MemoizationTableRef<T>) -> Mergle<T> {
@@ -93,14 +120,14 @@ impl<T: Clone + Ord + BrombergHashable> Mergle<T> {
         };
         Mergle {
             root: Rc::new(MergleNode::Internal(node)),
-            table: Rc::clone(&self.table),
+            table: self.table.clone(),
         }
     }
 
     pub fn copy(&self) -> Self {
         Mergle {
             root: Rc::clone(&self.root),
-            table: Rc::clone(&self.table),
+            table: self.table.clone(),
         }
     }
 
@@ -126,14 +153,8 @@ impl<T: Clone + Ord + BrombergHashable> Mergle<T> {
     pub fn prefix_cmp(&self, other: &Self) -> PrefixResult<T> {
         let self_hash = self.root.bromberg_hash();
         let other_hash = other.root.bromberg_hash();
-        {
-            // isolate immutable borrow
-            let table: &MemoizationTable<T> = &self.table.borrow();
-            if let Some(result) = table.get(&(self_hash, other_hash)) {
-                return (*result).clone();
-            } else if let Some(result) = table.get(&(other_hash, self_hash)) {
-                return result.inverse();
-            }
+        if let Some(result) = self.table.lookup(self_hash, other_hash) {
+            return result;
         }
 
         let result = match self.root.as_ref() {
@@ -142,9 +163,9 @@ impl<T: Clone + Ord + BrombergHashable> Mergle<T> {
                 _ => other.prefix_cmp(self).inverse(),
             },
             MergleNode::Internal(node) => {
-                let left_mergle = Mergle::from_node(Rc::clone(&node.left), Rc::clone(&self.table));
+                let left_mergle = Mergle::from_node(node.left.clone(), self.table.clone());
                 let right_mergle =
-                    Mergle::from_node(Rc::clone(&node.right), Rc::clone(&self.table));
+                    Mergle::from_node(node.right.clone(), self.table.clone());
                 match left_mergle.prefix_cmp(other) {
                     PrefixResult::LessThan => PrefixResult::LessThan,
                     PrefixResult::PrefixOf(b_suffix) => right_mergle.prefix_cmp(&b_suffix),
@@ -157,11 +178,6 @@ impl<T: Clone + Ord + BrombergHashable> Mergle<T> {
             }
         };
 
-        {
-            // isolate mutable borrow
-            let mut table = self.table.borrow_mut();
-            table.insert((self_hash, other_hash), result.clone());
-        }
         result
     }
 }
@@ -212,7 +228,7 @@ mod tests {
         if vec.len() == 0 {
             panic!()
         } else if vec.len() == 1 {
-            Mergle::singleton(U8(vec[0]), Rc::clone(table))
+            Mergle::singleton(U8(vec[0]), table.clone())
         } else {
             let split = if vec.len() == 2 {
                 1
@@ -230,7 +246,7 @@ mod tests {
             if a.is_empty() || b.is_empty() {
                 return TestResult::discard();
             }
-            let table : MemoizationTableRef<U8> = Rc::new(RefCell::new(MemoizationTable::new()));
+            let table : MemoizationTableRef<U8> = MemoizationTableRef::new();
             let a_mergle = make_mergle(&table, &a);
             let b_mergle = make_mergle(&table, &b);
             TestResult::from_bool((a_mergle.cmp(&b_mergle)) == (a.cmp(&b)))
@@ -242,7 +258,7 @@ mod tests {
             if a.is_empty() {
                 return TestResult::discard();
             }
-            let table : MemoizationTableRef<U8> = Rc::new(RefCell::new(MemoizationTable::new()));
+            let table : MemoizationTableRef<U8> = MemoizationTableRef::new();
             let a_mergle = make_mergle(&table, &a);
             let b_mergle = make_mergle(&table, &a);
             TestResult::from_bool((a_mergle.cmp(&b_mergle)) == Ordering::Equal)
