@@ -39,20 +39,24 @@ impl<T: Clone + BrombergHashable> MemoizationTableRef<T> {
 
     fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixResult<T>) {
         let mut table = self.0.borrow_mut();
-        table.insert((a, b), r.clone());
+        if a > b {
+            table.insert((b, a), r.inverse());
+        } else {
+            table.insert((a, b), r.clone());
+        }
     }
 
     fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<PrefixResult<T>> {
         if a == b {
-            return Some(PrefixResult::Equal);
+            Some(PrefixResult::Equal)
+        } else {
+            let table = self.0.borrow();
+            if a > b {
+                table.get(&(b, a)).map(|r| r.inverse())
+            } else {
+                table.get(&(a, b)).map(|r| r.clone())
+            }
         }
-        let table = self.0.borrow();
-        if let Some(result) = table.get(&(a, b)) {
-            return Some(result.clone());
-        } else if let Some(result) = table.get(&(b, a)) {
-            return Some(result.inverse());
-        }
-        None
     }
 }
 
