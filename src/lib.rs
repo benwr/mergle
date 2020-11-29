@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use bromberg_sl2::*;
 
-enum PrefixResult<T> {
+enum PrefixOrdering<T> {
     LessThan,
     PrefixOf(Rc<MergleNode<T>>),
     Equal,
@@ -14,31 +14,31 @@ enum PrefixResult<T> {
     GreaterThan,
 }
 
-impl<T> PrefixResult<T> {
-    fn inverse(&self) -> PrefixResult<T> {
+impl<T> PrefixOrdering<T> {
+    fn inverse(&self) -> PrefixOrdering<T> {
         match self {
-            PrefixResult::LessThan => PrefixResult::GreaterThan,
-            PrefixResult::PrefixOf(suffix) => PrefixResult::PrefixedBy(suffix.clone()),
-            PrefixResult::Equal => PrefixResult::Equal,
-            PrefixResult::PrefixedBy(suffix) => PrefixResult::PrefixOf(suffix.clone()),
-            PrefixResult::GreaterThan => PrefixResult::LessThan,
+            PrefixOrdering::LessThan => PrefixOrdering::GreaterThan,
+            PrefixOrdering::PrefixOf(suffix) => PrefixOrdering::PrefixedBy(suffix.clone()),
+            PrefixOrdering::Equal => PrefixOrdering::Equal,
+            PrefixOrdering::PrefixedBy(suffix) => PrefixOrdering::PrefixOf(suffix.clone()),
+            PrefixOrdering::GreaterThan => PrefixOrdering::LessThan,
         }
     }
 }
 
-impl<T> Clone for PrefixResult<T> {
+impl<T> Clone for PrefixOrdering<T> {
     fn clone(&self) -> Self {
         match self {
-            PrefixResult::PrefixOf(suffix) => PrefixResult::PrefixedBy(suffix.clone()),
-            PrefixResult::PrefixedBy(suffix) => PrefixResult::PrefixOf(suffix.clone()),
-            PrefixResult::LessThan => PrefixResult::LessThan,
-            PrefixResult::Equal => PrefixResult::Equal,
-            PrefixResult::GreaterThan => PrefixResult::GreaterThan,
+            PrefixOrdering::PrefixOf(suffix) => PrefixOrdering::PrefixedBy(suffix.clone()),
+            PrefixOrdering::PrefixedBy(suffix) => PrefixOrdering::PrefixOf(suffix.clone()),
+            PrefixOrdering::LessThan => PrefixOrdering::LessThan,
+            PrefixOrdering::Equal => PrefixOrdering::Equal,
+            PrefixOrdering::GreaterThan => PrefixOrdering::GreaterThan,
         }
     }
 }
 
-pub struct MemoizationTableRef<T>(Rc<RefCell<HashMap<(HashMatrix, HashMatrix), PrefixResult<T>>>>);
+pub struct MemoizationTableRef<T>(Rc<RefCell<HashMap<(HashMatrix, HashMatrix), PrefixOrdering<T>>>>);
 
 impl<T> Clone for MemoizationTableRef<T> {
     fn clone(&self) -> Self {
@@ -51,7 +51,7 @@ impl<T> MemoizationTableRef<T> {
         MemoizationTableRef(Rc::new(RefCell::new(HashMap::new())))
     }
 
-    fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixResult<T>) {
+    fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixOrdering<T>) {
         let mut table = self.0.borrow_mut();
         if a > b {
             table.insert((b, a), r.inverse());
@@ -60,9 +60,9 @@ impl<T> MemoizationTableRef<T> {
         }
     }
 
-    fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<PrefixResult<T>> {
+    fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<PrefixOrdering<T>> {
         if a == b {
-            Some(PrefixResult::Equal)
+            Some(PrefixOrdering::Equal)
         } else {
             let table = self.0.borrow();
             if a > b {
@@ -107,7 +107,7 @@ impl<T: Ord + BrombergHashable> MergleNode<T> {
         }
     }
 
-    fn prefix_cmp(&self, other: &Self, table: &MemoizationTableRef<T>) -> PrefixResult<T> {
+    fn prefix_cmp(&self, other: &Self, table: &MemoizationTableRef<T>) -> PrefixOrdering<T> {
         let my_hash = self.bromberg_hash();
         let their_hash = other.bromberg_hash();
         if let Some(result) = table.lookup(my_hash, their_hash) {
@@ -121,13 +121,13 @@ impl<T: Ord + BrombergHashable> MergleNode<T> {
             },
             MergleNode::Internal(node) => {
                 match node.left.prefix_cmp(other, table) {
-                    PrefixResult::LessThan => PrefixResult::LessThan,
-                    PrefixResult::PrefixOf(b_suffix) => node.right.prefix_cmp(&b_suffix, table),
-                    PrefixResult::Equal => PrefixResult::PrefixedBy(node.right.clone()),
-                    PrefixResult::PrefixedBy(a_suffix) => {
-                        PrefixResult::PrefixedBy(Rc::new(a_suffix.merge(&node.right)))
+                    PrefixOrdering::LessThan => PrefixOrdering::LessThan,
+                    PrefixOrdering::PrefixOf(b_suffix) => node.right.prefix_cmp(&b_suffix, table),
+                    PrefixOrdering::Equal => PrefixOrdering::PrefixedBy(node.right.clone()),
+                    PrefixOrdering::PrefixedBy(a_suffix) => {
+                        PrefixOrdering::PrefixedBy(Rc::new(a_suffix.merge(&node.right)))
                     }
-                    PrefixResult::GreaterThan => PrefixResult::GreaterThan,
+                    PrefixOrdering::GreaterThan => PrefixOrdering::GreaterThan,
                 }
             }
         };
@@ -179,15 +179,15 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
         self.root.values()
     }
 
-    fn leaf_cmp(a: &MergleLeaf<T>, b: &MergleLeaf<T>) -> PrefixResult<T> {
+    fn leaf_cmp(a: &MergleLeaf<T>, b: &MergleLeaf<T>) -> PrefixOrdering<T> {
         match a.content.cmp(&b.content) {
-            Ordering::Less => PrefixResult::LessThan,
-            Ordering::Equal => PrefixResult::Equal,
-            Ordering::Greater => PrefixResult::GreaterThan,
+            Ordering::Less => PrefixOrdering::LessThan,
+            Ordering::Equal => PrefixOrdering::Equal,
+            Ordering::Greater => PrefixOrdering::GreaterThan,
         }
     }
 
-    fn prefix_cmp(&self, other: &Self) -> PrefixResult<T> {
+    fn prefix_cmp(&self, other: &Self) -> PrefixOrdering<T> {
         self.root.prefix_cmp(other.root.as_ref(), &self.table)
     }
 }
@@ -209,11 +209,11 @@ impl<T: Ord + BrombergHashable> PartialOrd for Mergle<T> {
 impl<T:  Ord + BrombergHashable> Ord for Mergle<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.prefix_cmp(other) {
-            PrefixResult::LessThan => Ordering::Less,
-            PrefixResult::PrefixOf(_) => Ordering::Less,
-            PrefixResult::Equal => Ordering::Equal,
-            PrefixResult::PrefixedBy(_) => Ordering::Greater,
-            PrefixResult::GreaterThan => Ordering::Greater,
+            PrefixOrdering::LessThan => Ordering::Less,
+            PrefixOrdering::PrefixOf(_) => Ordering::Less,
+            PrefixOrdering::Equal => Ordering::Equal,
+            PrefixOrdering::PrefixedBy(_) => Ordering::Greater,
+            PrefixOrdering::GreaterThan => Ordering::Greater,
         }
     }
 }
