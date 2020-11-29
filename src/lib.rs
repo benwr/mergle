@@ -113,6 +113,10 @@ impl<T: Ord + BrombergHashable> MergleNode<T> {
         if let Some(result) = table.lookup(my_hash, their_hash) {
             return result;
         }
+        // TODO perhaps this should recurse in a more principled way. I'm not sure
+        // what exactly that way would be, but it might make use of e.g. nodes tracking
+        // ther left-height, or maybe their order statistics (though order statistics
+        // will grow really fast and make the asymptotics bad, probably).
         let result = match self {
             MergleNode::Leaf(leaf) => match other {
                 MergleNode::Leaf(other_leaf) => Mergle::leaf_cmp(&leaf, &other_leaf),
