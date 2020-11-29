@@ -175,13 +175,6 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
         self.root.values()
     }
 
-    fn from_node(node: Rc<MergleNode<T>>, table: MemoizationTableRef<T>) -> Mergle<T> {
-        Mergle {
-            root: node,
-            table: table,
-        }
-    }
-
     fn leaf_cmp(a: &MergleLeaf<T>, b: &MergleLeaf<T>) -> PrefixResult<T> {
         match a.content.cmp(&b.content) {
             Ordering::Less => PrefixResult::LessThan,
