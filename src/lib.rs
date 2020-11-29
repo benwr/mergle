@@ -6,16 +6,15 @@ use std::rc::Rc;
 
 use bromberg_sl2::*;
 
-#[derive(Clone)]
-pub enum PrefixResult<T> {
+enum PrefixResult<T> {
     LessThan,
-    PrefixOf(Mergle<T>),
+    PrefixOf(Rc<MergleNode<T>>),
     Equal,
-    PrefixedBy(Mergle<T>),
+    PrefixedBy(Rc<MergleNode<T>>),
     GreaterThan,
 }
 
-impl<T: Clone + BrombergHashable> PrefixResult<T> {
+impl<T: BrombergHashable> PrefixResult<T> {
     fn inverse(&self) -> PrefixResult<T> {
         match self {
             PrefixResult::LessThan => PrefixResult::GreaterThan,
@@ -27,14 +26,29 @@ impl<T: Clone + BrombergHashable> PrefixResult<T> {
     }
 }
 
-pub type MemoizationTable<T> = HashMap<(HashMatrix, HashMatrix), PrefixResult<T>>;
+impl<T> Clone for PrefixResult<T> {
+    fn clone(&self) -> Self {
+        match self {
+            PrefixResult::PrefixOf(suffix) => PrefixResult::PrefixedBy(suffix.clone()),
+            PrefixResult::PrefixedBy(suffix) => PrefixResult::PrefixOf(suffix.clone()),
+            PrefixResult::LessThan => PrefixResult::LessThan,
+            PrefixResult::Equal => PrefixResult::Equal,
+            PrefixResult::GreaterThan => PrefixResult::GreaterThan,
+        }
+    }
+}
 
-#[derive(Clone)]
-pub struct MemoizationTableRef<T>(Rc<RefCell<MemoizationTable<T>>>);
+pub struct MemoizationTableRef<T>(Rc<RefCell<HashMap<(HashMatrix, HashMatrix), PrefixResult<T>>>>);
 
-impl<T: Clone + BrombergHashable> MemoizationTableRef<T> {
+impl<T> Clone for MemoizationTableRef<T> {
+    fn clone(&self) -> Self {
+        MemoizationTableRef(Rc::clone(&self.0))
+    }
+}
+
+impl<T: BrombergHashable> MemoizationTableRef<T> {
     pub fn new() -> Self {
-        MemoizationTableRef(Rc::new(RefCell::new(MemoizationTable::new())))
+        MemoizationTableRef(Rc::new(RefCell::new(HashMap::new())))
     }
 
     fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixResult<T>) {
@@ -85,12 +99,47 @@ impl<T> BrombergHashable for MergleNode<T> {
     }
 }
 
-impl<T> MergleNode<T> {
+impl<T: Ord + BrombergHashable> MergleNode<T> {
     fn values(&self) -> Vec<&T> {
         match self {
             MergleNode::Internal(node) => [node.left.values(), node.right.values()].concat(),
             MergleNode::Leaf(leaf) => vec![&leaf.content],
         }
+    }
+
+    fn prefix_cmp(&self, other: &Self, table: &MemoizationTableRef<T>) -> PrefixResult<T> {
+        if let Some(result) = table.lookup(self.bromberg_hash(), other.bromberg_hash()) {
+            return result;
+        }
+
+        let result = match self {
+            MergleNode::Leaf(leaf) => match other {
+                MergleNode::Leaf(other_leaf) => Mergle::leaf_cmp(&leaf, &other_leaf),
+                _ => other.prefix_cmp(self, table).inverse(),
+            },
+            MergleNode::Internal(node) => {
+                match node.left.prefix_cmp(other, table) {
+                    PrefixResult::LessThan => PrefixResult::LessThan,
+                    PrefixResult::PrefixOf(b_suffix) => node.right.prefix_cmp(&b_suffix, table),
+                    PrefixResult::Equal => PrefixResult::PrefixedBy(node.right.clone()),
+                    PrefixResult::PrefixedBy(a_suffix) => {
+                        PrefixResult::PrefixedBy(Rc::new(a_suffix.merge(&node.right)))
+                    }
+                    PrefixResult::GreaterThan => PrefixResult::GreaterThan,
+                }
+            }
+        };
+
+        result
+    }
+
+    pub fn merge(self: &Rc<Self>, other: &Rc<Self>) -> Self {
+        let hash = self.bromberg_hash() * other.bromberg_hash();
+        MergleNode::Internal(MergleInternalNode {
+            hash: hash,
+            left: Rc::clone(self),
+            right: Rc::clone(other),
+        })
     }
 }
 
@@ -101,7 +150,7 @@ pub struct Mergle<T> {
 }
 
 
-impl<T: Clone + Ord + BrombergHashable> Mergle<T> {
+impl<T: Ord + BrombergHashable> Mergle<T> {
     pub fn singleton(t: T, table: MemoizationTableRef<T>) -> Mergle<T> {
         let h = t.bromberg_hash();
         let node = MergleLeaf {
@@ -116,21 +165,8 @@ impl<T: Clone + Ord + BrombergHashable> Mergle<T> {
     }
 
     pub fn merge(&self, other: &Self) -> Self {
-        let hash = self.root.bromberg_hash() * other.root.bromberg_hash();
-        let node = MergleInternalNode {
-            hash: hash,
-            left: Rc::clone(&self.root),
-            right: Rc::clone(&other.root),
-        };
         Mergle {
-            root: Rc::new(MergleNode::Internal(node)),
-            table: self.table.clone(),
-        }
-    }
-
-    pub fn copy(&self) -> Self {
-        Mergle {
-            root: Rc::clone(&self.root),
+            root: Rc::new(self.root.merge(&other.root)),
             table: self.table.clone(),
         }
     }
@@ -154,53 +190,26 @@ impl<T: Clone + Ord + BrombergHashable> Mergle<T> {
         }
     }
 
-    pub fn prefix_cmp(&self, other: &Self) -> PrefixResult<T> {
-        let self_hash = self.root.bromberg_hash();
-        let other_hash = other.root.bromberg_hash();
-        if let Some(result) = self.table.lookup(self_hash, other_hash) {
-            return result;
-        }
-
-        let result = match self.root.as_ref() {
-            MergleNode::Leaf(leaf) => match other.root.as_ref() {
-                MergleNode::Leaf(other_leaf) => Mergle::leaf_cmp(&leaf, &other_leaf),
-                _ => other.prefix_cmp(self).inverse(),
-            },
-            MergleNode::Internal(node) => {
-                let left_mergle = Mergle::from_node(node.left.clone(), self.table.clone());
-                let right_mergle =
-                    Mergle::from_node(node.right.clone(), self.table.clone());
-                match left_mergle.prefix_cmp(other) {
-                    PrefixResult::LessThan => PrefixResult::LessThan,
-                    PrefixResult::PrefixOf(b_suffix) => right_mergle.prefix_cmp(&b_suffix),
-                    PrefixResult::Equal => PrefixResult::PrefixedBy(right_mergle),
-                    PrefixResult::PrefixedBy(a_suffix) => {
-                        PrefixResult::PrefixedBy(a_suffix.merge(&right_mergle))
-                    }
-                    PrefixResult::GreaterThan => PrefixResult::GreaterThan,
-                }
-            }
-        };
-
-        result
+    fn prefix_cmp(&self, other: &Self) -> PrefixResult<T> {
+        self.root.prefix_cmp(other.root.as_ref(), &self.table)
     }
 }
 
-impl<T: Clone + Ord + BrombergHashable> PartialEq for Mergle<T> {
+impl<T: Ord + BrombergHashable> PartialEq for Mergle<T> {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl<T: Clone + Ord + BrombergHashable> Eq for Mergle<T> {}
+impl<T: Ord + BrombergHashable> Eq for Mergle<T> {}
 
-impl<T: Clone + Ord + BrombergHashable> PartialOrd for Mergle<T> {
+impl<T: Ord + BrombergHashable> PartialOrd for Mergle<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T: Clone + Ord + BrombergHashable> Ord for Mergle<T> {
+impl<T:  Ord + BrombergHashable> Ord for Mergle<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.prefix_cmp(other) {
             PrefixResult::LessThan => Ordering::Less,
