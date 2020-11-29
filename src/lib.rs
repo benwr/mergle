@@ -15,12 +15,12 @@ enum PrefixOrdering<T> {
 }
 
 impl<T> PrefixOrdering<T> {
-    fn inverse(&self) -> PrefixOrdering<T> {
+    fn inverse(self) -> PrefixOrdering<T> {
         match self {
             PrefixOrdering::LessThan => PrefixOrdering::GreaterThan,
-            PrefixOrdering::PrefixOf(suffix) => PrefixOrdering::PrefixedBy(suffix.clone()),
+            PrefixOrdering::PrefixOf(suffix) => PrefixOrdering::PrefixedBy(suffix),
             PrefixOrdering::Equal => PrefixOrdering::Equal,
-            PrefixOrdering::PrefixedBy(suffix) => PrefixOrdering::PrefixOf(suffix.clone()),
+            PrefixOrdering::PrefixedBy(suffix) => PrefixOrdering::PrefixOf(suffix),
             PrefixOrdering::GreaterThan => PrefixOrdering::LessThan,
         }
     }
@@ -66,7 +66,7 @@ impl<T> MemoizationTableRef<T> {
         } else {
             let table = self.0.borrow();
             if a > b {
-                table.get(&(b, a)).map(|r| r.inverse())
+                table.get(&(b, a)).map(|r| r.clone().inverse())
             } else {
                 table.get(&(a, b)).map(|r| r.clone())
             }
@@ -113,7 +113,6 @@ impl<T: Ord + BrombergHashable> MergleNode<T> {
         if let Some(result) = table.lookup(my_hash, their_hash) {
             return result;
         }
-
         let result = match self {
             MergleNode::Leaf(leaf) => match other {
                 MergleNode::Leaf(other_leaf) => Mergle::leaf_cmp(&leaf, &other_leaf),
@@ -124,16 +123,13 @@ impl<T: Ord + BrombergHashable> MergleNode<T> {
                     PrefixOrdering::LessThan => PrefixOrdering::LessThan,
                     PrefixOrdering::PrefixOf(b_suffix) => node.right.prefix_cmp(&b_suffix, table),
                     PrefixOrdering::Equal => PrefixOrdering::PrefixedBy(node.right.clone()),
-                    PrefixOrdering::PrefixedBy(a_suffix) => {
-                        PrefixOrdering::PrefixedBy(Rc::new(a_suffix.merge(&node.right)))
-                    }
+                    PrefixOrdering::PrefixedBy(a_suffix) =>
+                        PrefixOrdering::PrefixedBy(Rc::new(a_suffix.merge(&node.right))),
                     PrefixOrdering::GreaterThan => PrefixOrdering::GreaterThan,
                 }
             }
         };
-
         table.insert(my_hash, their_hash, result.clone());
-
         result
     }
 
@@ -146,6 +142,7 @@ impl<T: Ord + BrombergHashable> MergleNode<T> {
         })
     }
 }
+
 
 #[derive(Clone)]
 pub struct Mergle<T> {
