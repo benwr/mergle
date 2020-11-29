@@ -14,7 +14,7 @@ enum PrefixResult<T> {
     GreaterThan,
 }
 
-impl<T: BrombergHashable> PrefixResult<T> {
+impl<T> PrefixResult<T> {
     fn inverse(&self) -> PrefixResult<T> {
         match self {
             PrefixResult::LessThan => PrefixResult::GreaterThan,
@@ -46,7 +46,7 @@ impl<T> Clone for MemoizationTableRef<T> {
     }
 }
 
-impl<T: BrombergHashable> MemoizationTableRef<T> {
+impl<T> MemoizationTableRef<T> {
     pub fn new() -> Self {
         MemoizationTableRef(Rc::new(RefCell::new(HashMap::new())))
     }
@@ -108,7 +108,9 @@ impl<T: Ord + BrombergHashable> MergleNode<T> {
     }
 
     fn prefix_cmp(&self, other: &Self, table: &MemoizationTableRef<T>) -> PrefixResult<T> {
-        if let Some(result) = table.lookup(self.bromberg_hash(), other.bromberg_hash()) {
+        let my_hash = self.bromberg_hash();
+        let their_hash = other.bromberg_hash();
+        if let Some(result) = table.lookup(my_hash, their_hash) {
             return result;
         }
 
@@ -129,6 +131,8 @@ impl<T: Ord + BrombergHashable> MergleNode<T> {
                 }
             }
         };
+
+        table.insert(my_hash, their_hash, result.clone());
 
         result
     }
