@@ -6,52 +6,53 @@ use std::rc::Rc;
 
 use bromberg_sl2::*;
 
-enum PrefixOrdering<T> {
+enum PrefixDiff<T> {
     LessThan,
-    PrefixOf(Rc<MergleNode<T>>),
+    PrefixOf(Rc<Node<T>>),
     Equal,
-    PrefixedBy(Rc<MergleNode<T>>),
+    PrefixedBy(Rc<Node<T>>),
     GreaterThan,
 }
 
-impl<T> PrefixOrdering<T> {
-    fn inverse(self) -> PrefixOrdering<T> {
+impl<T> PrefixDiff<T> {
+    fn inverse(self) -> PrefixDiff<T> {
         match self {
-            PrefixOrdering::LessThan => PrefixOrdering::GreaterThan,
-            PrefixOrdering::PrefixOf(suffix) => PrefixOrdering::PrefixedBy(suffix),
-            PrefixOrdering::Equal => PrefixOrdering::Equal,
-            PrefixOrdering::PrefixedBy(suffix) => PrefixOrdering::PrefixOf(suffix),
-            PrefixOrdering::GreaterThan => PrefixOrdering::LessThan,
+            PrefixDiff::LessThan => PrefixDiff::GreaterThan,
+            PrefixDiff::PrefixOf(suffix) => PrefixDiff::PrefixedBy(suffix),
+            PrefixDiff::Equal => PrefixDiff::Equal,
+            PrefixDiff::PrefixedBy(suffix) => PrefixDiff::PrefixOf(suffix),
+            PrefixDiff::GreaterThan => PrefixDiff::LessThan,
         }
     }
 }
 
-impl<T> Clone for PrefixOrdering<T> {
+impl<T> Clone for PrefixDiff<T> {
     fn clone(&self) -> Self {
         match self {
-            PrefixOrdering::PrefixOf(suffix) => PrefixOrdering::PrefixedBy(suffix.clone()),
-            PrefixOrdering::PrefixedBy(suffix) => PrefixOrdering::PrefixOf(suffix.clone()),
-            PrefixOrdering::LessThan => PrefixOrdering::LessThan,
-            PrefixOrdering::Equal => PrefixOrdering::Equal,
-            PrefixOrdering::GreaterThan => PrefixOrdering::GreaterThan,
+            PrefixDiff::PrefixOf(suffix) => PrefixDiff::PrefixedBy(suffix.clone()),
+            PrefixDiff::PrefixedBy(suffix) => PrefixDiff::PrefixOf(suffix.clone()),
+            PrefixDiff::LessThan => PrefixDiff::LessThan,
+            PrefixDiff::Equal => PrefixDiff::Equal,
+            PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
         }
     }
 }
 
-pub struct MemoizationTableRef<T>(Rc<RefCell<HashMap<(HashMatrix, HashMatrix), PrefixOrdering<T>>>>);
+pub struct MemTableRef<T>(
+    Rc<RefCell<HashMap<(HashMatrix, HashMatrix), PrefixDiff<T>>>>);
 
-impl<T> Clone for MemoizationTableRef<T> {
+impl<T> Clone for MemTableRef<T> {
     fn clone(&self) -> Self {
-        MemoizationTableRef(Rc::clone(&self.0))
+        MemTableRef(Rc::clone(&self.0))
     }
 }
 
-impl<T> MemoizationTableRef<T> {
+impl<T> MemTableRef<T> {
     pub fn new() -> Self {
-        MemoizationTableRef(Rc::new(RefCell::new(HashMap::new())))
+        MemTableRef(Rc::new(RefCell::new(HashMap::new())))
     }
 
-    fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixOrdering<T>) {
+    fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixDiff<T>) {
         let mut table = self.0.borrow_mut();
         if a > b {
             table.insert((b, a), r.inverse());
@@ -60,9 +61,9 @@ impl<T> MemoizationTableRef<T> {
         }
     }
 
-    fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<PrefixOrdering<T>> {
+    fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<PrefixDiff<T>> {
         if a == b {
-            Some(PrefixOrdering::Equal)
+            Some(PrefixDiff::Equal)
         } else {
             let table = self.0.borrow();
             if a > b {
@@ -74,40 +75,37 @@ impl<T> MemoizationTableRef<T> {
     }
 }
 
-struct MergleInternalNode<T> {
+struct InternalNode<T> {
     hash: HashMatrix,
-    left: Rc<MergleNode<T>>,
-    right: Rc<MergleNode<T>>,
+    left: Rc<Node<T>>,
+    right: Rc<Node<T>>,
 }
 
-struct MergleLeaf<T> {
+struct LeafNode<T> {
     content: T,
     hash: HashMatrix,
 }
 
-enum MergleNode<T> {
-    Internal(MergleInternalNode<T>),
-    Leaf(MergleLeaf<T>),
+enum Node<T> {
+    Internal(InternalNode<T>),
+    Leaf(LeafNode<T>),
 }
 
-impl<T> BrombergHashable for MergleNode<T> {
+impl<T> BrombergHashable for Node<T> {
     fn bromberg_hash(&self) -> HashMatrix {
         match self {
-            MergleNode::Internal(node) => node.hash,
-            MergleNode::Leaf(node) => node.hash,
+            Node::Internal(node) => node.hash,
+            Node::Leaf(node) => node.hash,
         }
     }
 }
 
-impl<T: Ord + BrombergHashable> MergleNode<T> {
-    fn values(&self) -> Vec<&T> {
-        match self {
-            MergleNode::Internal(node) => [node.left.values(), node.right.values()].concat(),
-            MergleNode::Leaf(leaf) => vec![&leaf.content],
-        }
+impl<T: Ord + BrombergHashable> Node<T> {
+    fn iter(&self) -> Iter<T> {
+        panic!()
     }
 
-    fn prefix_cmp(&self, other: &Self, table: &MemoizationTableRef<T>) -> PrefixOrdering<T> {
+    fn prefix_cmp(&self, other: &Self, table: &MemTableRef<T>) -> PrefixDiff<T> {
         let my_hash = self.bromberg_hash();
         let their_hash = other.bromberg_hash();
         if let Some(result) = table.lookup(my_hash, their_hash) {
@@ -118,18 +116,18 @@ impl<T: Ord + BrombergHashable> MergleNode<T> {
         // ther left-height, or maybe their order statistics (though order statistics
         // will grow really fast and make the asymptotics bad, probably).
         let result = match self {
-            MergleNode::Leaf(leaf) => match other {
-                MergleNode::Leaf(other_leaf) => Mergle::leaf_cmp(&leaf, &other_leaf),
+            Node::Leaf(leaf) => match other {
+                Node::Leaf(other_leaf) => Mergle::leaf_cmp(&leaf, &other_leaf),
                 _ => other.prefix_cmp(self, table).inverse(),
             },
-            MergleNode::Internal(node) => {
+            Node::Internal(node) => {
                 match node.left.prefix_cmp(other, table) {
-                    PrefixOrdering::LessThan => PrefixOrdering::LessThan,
-                    PrefixOrdering::PrefixOf(b_suffix) => node.right.prefix_cmp(&b_suffix, table),
-                    PrefixOrdering::Equal => PrefixOrdering::PrefixedBy(node.right.clone()),
-                    PrefixOrdering::PrefixedBy(a_suffix) =>
-                        PrefixOrdering::PrefixedBy(Rc::new(a_suffix.merge(&node.right))),
-                    PrefixOrdering::GreaterThan => PrefixOrdering::GreaterThan,
+                    PrefixDiff::LessThan => PrefixDiff::LessThan,
+                    PrefixDiff::PrefixOf(b_suffix) => node.right.prefix_cmp(&b_suffix, table),
+                    PrefixDiff::Equal => PrefixDiff::PrefixedBy(node.right.clone()),
+                    PrefixDiff::PrefixedBy(a_suffix) =>
+                        PrefixDiff::PrefixedBy(Rc::new(a_suffix.merge(&node.right))),
+                    PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
                 }
             }
         };
@@ -139,7 +137,7 @@ impl<T: Ord + BrombergHashable> MergleNode<T> {
 
     pub fn merge(self: &Rc<Self>, other: &Rc<Self>) -> Self {
         let hash = self.bromberg_hash() * other.bromberg_hash();
-        MergleNode::Internal(MergleInternalNode {
+        Node::Internal(InternalNode {
             hash: hash,
             left: Rc::clone(self),
             right: Rc::clone(other),
@@ -150,21 +148,33 @@ impl<T: Ord + BrombergHashable> MergleNode<T> {
 
 #[derive(Clone)]
 pub struct Mergle<T> {
-    root: Rc<MergleNode<T>>,
-    table: MemoizationTableRef<T>,
+    root: Rc<Node<T>>,
+    table: MemTableRef<T>,
+}
+
+pub struct Iter<'a, T> {
+    stack: Vec<(&'a InternalNode<T>, bool)>,
+    tip: Option<&'a LeafNode<T>>,
+}
+
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = &'a T;
+    fn next(&mut self) -> Option<Self::Item> {
+        panic!()
+    }
 }
 
 
 impl<T: Ord + BrombergHashable> Mergle<T> {
-    pub fn singleton(t: T, table: MemoizationTableRef<T>) -> Mergle<T> {
+    pub fn singleton(t: T, table: MemTableRef<T>) -> Mergle<T> {
         let h = t.bromberg_hash();
-        let node = MergleLeaf {
+        let node = LeafNode {
             content: t,
             hash: h,
         };
 
         Mergle {
-            root: Rc::new(MergleNode::Leaf(node)),
+            root: Rc::new(Node::Leaf(node)),
             table: table,
         }
     }
@@ -176,19 +186,19 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
         }
     }
 
-    fn values(&self) -> Vec<&T> {
-        self.root.values()
+    fn iter(&self) -> Iter<T> {
+        self.root.iter()
     }
 
-    fn leaf_cmp(a: &MergleLeaf<T>, b: &MergleLeaf<T>) -> PrefixOrdering<T> {
+    fn leaf_cmp(a: &LeafNode<T>, b: &LeafNode<T>) -> PrefixDiff<T> {
         match a.content.cmp(&b.content) {
-            Ordering::Less => PrefixOrdering::LessThan,
-            Ordering::Equal => PrefixOrdering::Equal,
-            Ordering::Greater => PrefixOrdering::GreaterThan,
+            Ordering::Less => PrefixDiff::LessThan,
+            Ordering::Equal => PrefixDiff::Equal,
+            Ordering::Greater => PrefixDiff::GreaterThan,
         }
     }
 
-    fn prefix_cmp(&self, other: &Self) -> PrefixOrdering<T> {
+    fn prefix_cmp(&self, other: &Self) -> PrefixDiff<T> {
         self.root.prefix_cmp(other.root.as_ref(), &self.table)
     }
 }
@@ -210,11 +220,11 @@ impl<T: Ord + BrombergHashable> PartialOrd for Mergle<T> {
 impl<T:  Ord + BrombergHashable> Ord for Mergle<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.prefix_cmp(other) {
-            PrefixOrdering::LessThan => Ordering::Less,
-            PrefixOrdering::PrefixOf(_) => Ordering::Less,
-            PrefixOrdering::Equal => Ordering::Equal,
-            PrefixOrdering::PrefixedBy(_) => Ordering::Greater,
-            PrefixOrdering::GreaterThan => Ordering::Greater,
+            PrefixDiff::LessThan => Ordering::Less,
+            PrefixDiff::PrefixOf(_) => Ordering::Less,
+            PrefixDiff::Equal => Ordering::Equal,
+            PrefixDiff::PrefixedBy(_) => Ordering::Greater,
+            PrefixDiff::GreaterThan => Ordering::Greater,
         }
     }
 }
@@ -234,7 +244,7 @@ mod tests {
         }
     }
 
-    fn make_mergle(table: &MemoizationTableRef<U8>, vec: &[u8]) -> Mergle<U8> {
+    fn make_mergle(table: &MemTableRef<U8>, vec: &[u8]) -> Mergle<U8> {
         let mut rng = rand::thread_rng();
         if vec.len() == 0 {
             panic!()
@@ -257,7 +267,7 @@ mod tests {
             if a.is_empty() || b.is_empty() {
                 return TestResult::discard();
             }
-            let table : MemoizationTableRef<U8> = MemoizationTableRef::new();
+            let table : MemTableRef<U8> = MemTableRef::new();
             let a_mergle = make_mergle(&table, &a);
             let b_mergle = make_mergle(&table, &b);
             TestResult::from_bool((a_mergle.cmp(&b_mergle)) == (a.cmp(&b)))
@@ -269,7 +279,7 @@ mod tests {
             if a.is_empty() {
                 return TestResult::discard();
             }
-            let table : MemoizationTableRef<U8> = MemoizationTableRef::new();
+            let table : MemTableRef<U8> = MemTableRef::new();
             let a_mergle = make_mergle(&table, &a);
             let b_mergle = make_mergle(&table, &a);
             TestResult::from_bool((a_mergle.cmp(&b_mergle)) == Ordering::Equal)
