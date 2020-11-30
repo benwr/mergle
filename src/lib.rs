@@ -115,16 +115,18 @@ impl<T: Ord + BrombergHashable> Node<T> {
         // what exactly that way would be, but it might make use of e.g. nodes tracking
         // ther left-height, or maybe their order statistics (though order statistics
         // will grow really fast and make the asymptotics bad, probably).
-        let result = match self {
-            Node::Leaf(leaf) => match other {
-                Node::Leaf(other_leaf) => Mergle::leaf_cmp(&leaf, &other_leaf),
-                _ => other.prefix_cmp(self, table).inverse(),
-            },
-            Node::Internal(node) => {
+        let result = match (self, other) {
+            (Node::Leaf(leaf), Node::Leaf(other_leaf)) =>
+                Mergle::leaf_cmp(&leaf, &other_leaf),
+            (Node::Leaf(leaf), _) =>
+                other.prefix_cmp(self, table).inverse(),
+            (Node::Internal(node), _) => {
                 match node.left.prefix_cmp(other, table) {
                     PrefixDiff::LessThan => PrefixDiff::LessThan,
-                    PrefixDiff::PrefixOf(b_suffix) => node.right.prefix_cmp(&b_suffix, table),
-                    PrefixDiff::Equal => PrefixDiff::PrefixedBy(node.right.clone()),
+                    PrefixDiff::PrefixOf(b_suffix) =>
+                        node.right.prefix_cmp(&b_suffix, table),
+                    PrefixDiff::Equal =>
+                        PrefixDiff::PrefixedBy(node.right.clone()),
                     PrefixDiff::PrefixedBy(a_suffix) =>
                         PrefixDiff::PrefixedBy(Rc::new(a_suffix.merge(&node.right))),
                     PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
