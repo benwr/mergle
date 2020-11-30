@@ -101,8 +101,14 @@ impl<T> BrombergHashable for Node<T> {
 }
 
 impl<T: Ord + BrombergHashable> Node<T> {
-    fn iter(&self) -> Iter<T> {
-        panic!()
+    fn iter<'a>(&'a self) -> Iter<'a, T> {
+        let mut stack = vec![];
+        let p: &Node<T> = self;
+        let l = find_leftmost_leaf(p, &mut stack);
+        return Iter {
+            stack: stack,
+            tip: Some(l)
+        };
     }
 
     fn prefix_cmp(&self, other: &Self, table: &MemTableRef<T>) -> PrefixDiff<T> {
@@ -118,7 +124,7 @@ impl<T: Ord + BrombergHashable> Node<T> {
         let result = match (self, other) {
             (Node::Leaf(leaf), Node::Leaf(other_leaf)) =>
                 Mergle::leaf_cmp(&leaf, &other_leaf),
-            (Node::Leaf(leaf), _) =>
+            (Node::Leaf(_), _) =>
                 other.prefix_cmp(self, table).inverse(),
             (Node::Internal(node), _) => {
                 match node.left.prefix_cmp(other, table) {
@@ -147,13 +153,25 @@ impl<T: Ord + BrombergHashable> Node<T> {
     }
 }
 
-
 #[derive(Clone)]
 pub struct Mergle<T> {
     root: Rc<Node<T>>,
     table: MemTableRef<T>,
 }
 
+fn find_leftmost_leaf<'a, T>(mut p: &'a Node<T>, stack: &mut Vec<(&'a InternalNode<T>, bool)>) -> &'a LeafNode<T> {
+    loop {
+        match p {
+            Node::Internal(n) => {
+                stack.push((n, false));
+                p = &*n.left;
+            },
+            Node::Leaf(n) => {
+                return n;
+            }
+        }
+    }
+}
 pub struct Iter<'a, T> {
     stack: Vec<(&'a InternalNode<T>, bool)>,
     tip: Option<&'a LeafNode<T>>,
@@ -162,7 +180,19 @@ pub struct Iter<'a, T> {
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
     fn next(&mut self) -> Option<Self::Item> {
-        panic!()
+        let result = self.tip.map(|t| &t.content);
+
+        self.tip = None;
+
+        while let Some((n, b)) = self.stack.pop() {
+            if !b {
+                self.stack.push((n, true));
+                let l = find_leftmost_leaf(&*n.right, &mut self.stack);
+                self.tip = Some(l);
+                break;
+            }
+        }
+        result
     }
 }
 
@@ -188,7 +218,7 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
         }
     }
 
-    fn iter(&self) -> Iter<T> {
+    pub fn iter(&self) -> Iter<T> {
         self.root.iter()
     }
 
