@@ -38,8 +38,7 @@ impl<T> Clone for PrefixDiff<T> {
     }
 }
 
-pub struct MemTableRef<T>(
-    Rc<RefCell<HashMap<(HashMatrix, HashMatrix), PrefixDiff<T>>>>);
+pub struct MemTableRef<T>(Rc<RefCell<HashMap<(HashMatrix, HashMatrix), PrefixDiff<T>>>>);
 
 impl<T> Clone for MemTableRef<T> {
     fn clone(&self) -> Self {
@@ -107,7 +106,7 @@ impl<T: Ord + BrombergHashable> Node<T> {
         let l = find_leftmost_leaf(p, &mut stack);
         return Iter {
             stack: stack,
-            tip: Some(l)
+            tip: Some(l),
         };
     }
 
@@ -122,22 +121,17 @@ impl<T: Ord + BrombergHashable> Node<T> {
         // ther left-height, or maybe their order statistics (though order statistics
         // will grow really fast and make the asymptotics bad, probably).
         let result = match (self, other) {
-            (Node::Leaf(leaf), Node::Leaf(other_leaf)) =>
-                Mergle::leaf_cmp(&leaf, &other_leaf),
-            (Node::Leaf(_), _) =>
-                other.prefix_cmp(self, table).inverse(),
-            (Node::Internal(node), _) => {
-                match node.left.prefix_cmp(other, table) {
-                    PrefixDiff::LessThan => PrefixDiff::LessThan,
-                    PrefixDiff::PrefixOf(b_suffix) =>
-                        node.right.prefix_cmp(&b_suffix, table),
-                    PrefixDiff::Equal =>
-                        PrefixDiff::PrefixedBy(node.right.clone()),
-                    PrefixDiff::PrefixedBy(a_suffix) =>
-                        PrefixDiff::PrefixedBy(Rc::new(a_suffix.merge(&node.right))),
-                    PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
+            (Node::Leaf(leaf), Node::Leaf(other_leaf)) => Mergle::leaf_cmp(&leaf, &other_leaf),
+            (Node::Leaf(_), _) => other.prefix_cmp(self, table).inverse(),
+            (Node::Internal(node), _) => match node.left.prefix_cmp(other, table) {
+                PrefixDiff::LessThan => PrefixDiff::LessThan,
+                PrefixDiff::PrefixOf(b_suffix) => node.right.prefix_cmp(&b_suffix, table),
+                PrefixDiff::Equal => PrefixDiff::PrefixedBy(node.right.clone()),
+                PrefixDiff::PrefixedBy(a_suffix) => {
+                    PrefixDiff::PrefixedBy(Rc::new(a_suffix.merge(&node.right)))
                 }
-            }
+                PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
+            },
         };
         table.insert(my_hash, their_hash, result.clone());
         result
@@ -159,13 +153,16 @@ pub struct Mergle<T> {
     table: MemTableRef<T>,
 }
 
-fn find_leftmost_leaf<'a, T>(mut p: &'a Node<T>, stack: &mut Vec<(&'a InternalNode<T>, bool)>) -> &'a LeafNode<T> {
+fn find_leftmost_leaf<'a, T>(
+    mut p: &'a Node<T>,
+    stack: &mut Vec<(&'a InternalNode<T>, bool)>,
+) -> &'a LeafNode<T> {
     loop {
         match p {
             Node::Internal(n) => {
                 stack.push((n, false));
                 p = &*n.left;
-            },
+            }
             Node::Leaf(n) => {
                 return n;
             }
@@ -195,7 +192,6 @@ impl<'a, T> Iterator for Iter<'a, T> {
         result
     }
 }
-
 
 impl<T: Ord + BrombergHashable> Mergle<T> {
     pub fn singleton(t: T, table: MemTableRef<T>) -> Mergle<T> {
@@ -249,7 +245,7 @@ impl<T: Ord + BrombergHashable> PartialOrd for Mergle<T> {
     }
 }
 
-impl<T:  Ord + BrombergHashable> Ord for Mergle<T> {
+impl<T: Ord + BrombergHashable> Ord for Mergle<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.prefix_cmp(other) {
             PrefixDiff::LessThan => Ordering::Less,
@@ -265,7 +261,6 @@ impl<T:  Ord + BrombergHashable> Ord for Mergle<T> {
 mod tests {
     use super::*;
     use quickcheck::*;
-    use rand::Rng;
 
     #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Debug)]
     struct U8(pub u8);
@@ -276,45 +271,72 @@ mod tests {
         }
     }
 
-    fn make_mergle(table: &MemTableRef<U8>, vec: &[u8]) -> Mergle<U8> {
-        let mut rng = rand::thread_rng();
-        if vec.len() == 0 {
-            panic!()
-        } else if vec.len() == 1 {
-            Mergle::singleton(U8(vec[0]), table.clone())
-        } else {
-            let split = if vec.len() == 2 {
-                1
-            } else {
-                rng.gen_range(1, vec.len() - 1)
+    #[derive(Debug, Clone)]
+    enum MergleOp {
+        Singleton(U8),
+        Merge(usize, usize),
+    }
+
+    impl Arbitrary for MergleOp {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            match bool::arbitrary(g) {
+                false => MergleOp::Singleton(U8(u8::arbitrary(g))),
+                true => MergleOp::Merge(usize::arbitrary(g), usize::arbitrary(g)),
+            }
+        }
+    }
+
+    fn make_mergle(table: &MemTableRef<U8>, vec: &[MergleOp]) -> Option<Mergle<U8>> {
+        let mut mergles = Vec::new();
+        for op in vec {
+            let new_mergle = match op {
+                MergleOp::Singleton(elem) => Some(Mergle::singleton(elem.clone(), table.clone())),
+                MergleOp::Merge(a, b) => {
+                    if !mergles.is_empty() {
+                        let mergle_a: &Mergle<U8> = mergles.get(a % mergles.len()).unwrap();
+                        let mergle_b: &Mergle<U8> = mergles.get(b % mergles.len()).unwrap();
+                        Some(mergle_a.merge(&mergle_b))
+                    } else {
+                        None
+                    }
+                }
             };
-            let left = make_mergle(table, &vec[..split]);
-            let right = make_mergle(table, &vec[split..]);
-            left.merge(&right)
+            if let Some(m) = new_mergle {
+                mergles.push(m);
+            }
+        }
+        mergles.pop()
+    }
+
+    quickcheck! {
+        fn test_ord(a : Vec<MergleOp>, b : Vec<MergleOp>) -> TestResult {
+            let table : MemTableRef<U8> = MemTableRef::new();
+            match (make_mergle(&table, &a), make_mergle(&table, &b)) {
+                (Some(a_mergle), Some(b_mergle)) => {
+                    let a_values : Vec<&U8> = a_mergle.iter().collect();
+                    let b_values : Vec<&U8> = b_mergle.iter().collect();
+                    let values_ord = a_values.cmp(&b_values);
+                    let mergle_ord = a_mergle.cmp(&b_mergle);
+                    TestResult::from_bool(mergle_ord == values_ord)
+                },
+                _ => {
+                    TestResult::discard()
+                }
+            }
         }
     }
 
     quickcheck! {
-        fn test_ord(a : Vec<u8>, b : Vec<u8>) -> TestResult {
-            if a.is_empty() || b.is_empty() {
-                return TestResult::discard();
-            }
+        fn test_eq(a : Vec<MergleOp>) -> TestResult {
             let table : MemTableRef<U8> = MemTableRef::new();
-            let a_mergle = make_mergle(&table, &a);
-            let b_mergle = make_mergle(&table, &b);
-            TestResult::from_bool((a_mergle.cmp(&b_mergle)) == (a.cmp(&b)))
-        }
-    }
-
-    quickcheck! {
-        fn test_eq(a : Vec<u8>) -> TestResult {
-            if a.is_empty() {
-                return TestResult::discard();
+            match (make_mergle(&table, &a), make_mergle(&table, &a)) {
+                (Some(a_mergle), Some(b_mergle)) => {
+                    TestResult::from_bool(a_mergle == b_mergle)
+                },
+                _ => {
+                    TestResult::discard()
+                }
             }
-            let table : MemTableRef<U8> = MemTableRef::new();
-            let a_mergle = make_mergle(&table, &a);
-            let b_mergle = make_mergle(&table, &a);
-            TestResult::from_bool((a_mergle.cmp(&b_mergle)) == Ordering::Equal)
         }
     }
 }
