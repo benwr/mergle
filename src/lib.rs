@@ -29,8 +29,8 @@ impl<T> PrefixDiff<T> {
 impl<T> Clone for PrefixDiff<T> {
     fn clone(&self) -> Self {
         match self {
-            PrefixDiff::PrefixOf(suffix) => PrefixDiff::PrefixedBy(suffix.clone()),
-            PrefixDiff::PrefixedBy(suffix) => PrefixDiff::PrefixOf(suffix.clone()),
+            PrefixDiff::PrefixOf(suffix) => PrefixDiff::PrefixOf(suffix.clone()),
+            PrefixDiff::PrefixedBy(suffix) => PrefixDiff::PrefixedBy(suffix.clone()),
             PrefixDiff::LessThan => PrefixDiff::LessThan,
             PrefixDiff::Equal => PrefixDiff::Equal,
             PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
@@ -323,6 +323,27 @@ mod tests {
                     TestResult::discard()
                 }
             }
+        }
+    }
+
+    #[test]
+    fn ord_regression() {
+        let a = vec![
+            MergleOp::Singleton(U8(99)),
+            MergleOp::Merge(28, 86),
+            MergleOp::Merge(19, 13),
+            MergleOp::Merge(66, 64),
+        ];
+        let b = vec![MergleOp::Singleton(U8(99)), MergleOp::Merge(13, 47)];
+
+        let table: MemTableRef<U8> = MemTableRef::new();
+        if let (Some(a_mergle), Some(b_mergle)) = (make_mergle(&table, &a), make_mergle(&table, &b))
+        {
+            let a_values: Vec<&U8> = a_mergle.iter().collect();
+            let b_values: Vec<&U8> = b_mergle.iter().collect();
+            let values_ord = a_values.cmp(&b_values);
+            let mergle_ord = a_mergle.cmp(&b_mergle);
+            assert_eq!(mergle_ord, values_ord);
         }
     }
 
