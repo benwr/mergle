@@ -1,12 +1,12 @@
 [package]
 name = "mergle"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Ben Weinstein-Raun <root@benwr.net>", "Jennifer Blight <jgblight@gmail.com>"]
 edition = "2018"
 license = "CC0-1.0"
 description = "A data structure with fast merging and comparison"
 repository = "https://github.com/benwr/mergle"
-categories = ["data structures"]
+categories = ["data-structures"]
 
 [profile.release]
 lto = true
