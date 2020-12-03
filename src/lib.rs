@@ -6,11 +6,11 @@ use std::rc::Rc;
 
 use bromberg_sl2::*;
 
-enum PrefixDiff<T> {
+pub enum PrefixDiff<T> {
     LessThan,
-    PrefixOf(Rc<Node<T>>),
+    PrefixOf(T),
     Equal,
-    PrefixedBy(Rc<Node<T>>),
+    PrefixedBy(T),
     GreaterThan,
 }
 
@@ -26,7 +26,7 @@ impl<T> PrefixDiff<T> {
     }
 }
 
-impl<T> Clone for PrefixDiff<T> {
+impl<T: Clone> Clone for PrefixDiff<T> {
     fn clone(&self) -> Self {
         match self {
             PrefixDiff::PrefixOf(suffix) => PrefixDiff::PrefixOf(suffix.clone()),
@@ -38,7 +38,7 @@ impl<T> Clone for PrefixDiff<T> {
     }
 }
 
-pub struct MemTableRef<T>(Rc<RefCell<HashMap<(HashMatrix, HashMatrix), PrefixDiff<T>>>>);
+pub struct MemTableRef<T>(Rc<RefCell<HashMap<(HashMatrix, HashMatrix), PrefixDiff<Rc<Node<T>>>>>>);
 
 impl<T> Clone for MemTableRef<T> {
     fn clone(&self) -> Self {
@@ -51,7 +51,7 @@ impl<T> MemTableRef<T> {
         MemTableRef(Rc::new(RefCell::new(HashMap::new())))
     }
 
-    fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixDiff<T>) {
+    fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixDiff<Rc<Node<T>>>) {
         let mut table = self.0.borrow_mut();
         if a > b {
             table.insert((b, a), r.inverse());
@@ -60,7 +60,7 @@ impl<T> MemTableRef<T> {
         }
     }
 
-    fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<PrefixDiff<T>> {
+    fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<PrefixDiff<Rc<Node<T>>>> {
         if a == b {
             Some(PrefixDiff::Equal)
         } else {
@@ -110,7 +110,7 @@ impl<T: Ord + BrombergHashable> Node<T> {
         };
     }
 
-    fn prefix_cmp(&self, other: &Self, table: &MemTableRef<T>) -> PrefixDiff<T> {
+    fn prefix_cmp(&self, other: &Self, table: &MemTableRef<T>) -> PrefixDiff<Rc<Node<T>>> {
         let my_hash = self.bromberg_hash();
         let their_hash = other.bromberg_hash();
         if let Some(result) = table.lookup(my_hash, their_hash) {
@@ -218,7 +218,7 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
         self.root.iter()
     }
 
-    fn leaf_cmp(a: &LeafNode<T>, b: &LeafNode<T>) -> PrefixDiff<T> {
+    fn leaf_cmp(a: &LeafNode<T>, b: &LeafNode<T>) -> PrefixDiff<Rc<Node<T>>> {
         match a.content.cmp(&b.content) {
             Ordering::Less => PrefixDiff::LessThan,
             Ordering::Equal => PrefixDiff::Equal,
@@ -226,8 +226,28 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
         }
     }
 
-    fn prefix_cmp(&self, other: &Self) -> PrefixDiff<T> {
+    fn prefix_cmp(&self, other: &Self) -> PrefixDiff<Rc<Node<T>>> {
         self.root.prefix_cmp(other.root.as_ref(), &self.table)
+    }
+
+    pub fn prefix_diff(&self, other: &Self) -> PrefixDiff<Mergle<T>> {
+        match self.root.prefix_cmp(other.root.as_ref(), &self.table) {
+            PrefixDiff::LessThan => PrefixDiff::LessThan,
+            PrefixDiff::PrefixOf(suffix) => PrefixDiff::PrefixOf(
+                Mergle {
+                    root: suffix.clone(),
+                    table: self.table.clone(),
+                }
+            ),
+            PrefixDiff::Equal => PrefixDiff::Equal,
+            PrefixDiff::PrefixedBy(suffix) => PrefixDiff::PrefixedBy(
+                Mergle {
+                    root: suffix.clone(),
+                    table: self.table.clone(),
+                }
+            ),
+            PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
+        }
     }
 }
 
