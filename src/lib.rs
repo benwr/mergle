@@ -233,19 +233,15 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
     pub fn prefix_diff(&self, other: &Self) -> PrefixDiff<Mergle<T>> {
         match self.root.prefix_cmp(other.root.as_ref(), &self.table) {
             PrefixDiff::LessThan => PrefixDiff::LessThan,
-            PrefixDiff::PrefixOf(suffix) => PrefixDiff::PrefixOf(
-                Mergle {
-                    root: suffix.clone(),
-                    table: self.table.clone(),
-                }
-            ),
+            PrefixDiff::PrefixOf(suffix) => PrefixDiff::PrefixOf(Mergle {
+                root: suffix.clone(),
+                table: self.table.clone(),
+            }),
             PrefixDiff::Equal => PrefixDiff::Equal,
-            PrefixDiff::PrefixedBy(suffix) => PrefixDiff::PrefixedBy(
-                Mergle {
-                    root: suffix.clone(),
-                    table: self.table.clone(),
-                }
-            ),
+            PrefixDiff::PrefixedBy(suffix) => PrefixDiff::PrefixedBy(Mergle {
+                root: suffix.clone(),
+                table: self.table.clone(),
+            }),
             PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
         }
     }
