@@ -214,6 +214,16 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
         }
     }
 
+    pub fn append(&self, t: T) -> Mergle<T> {
+        let elem = Mergle::singleton(t, self.table.clone());
+        self.merge(&elem)
+    }
+
+    pub fn prepend(&self, t: T) -> Mergle<T> {
+        let elem = Mergle::singleton(t, self.table.clone());
+        elem.merge(self)
+    }
+
     pub fn iter(&self) -> Iter<T> {
         self.root.iter()
     }
@@ -287,6 +297,12 @@ mod tests {
         }
     }
 
+    impl Arbitrary for U8 {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            U8(u8::arbitrary(g))
+        }
+    }
+
     #[derive(Debug, Clone)]
     enum MergleOp {
         Singleton(U8),
@@ -334,6 +350,40 @@ mod tests {
                     let values_ord = a_values.cmp(&b_values);
                     let mergle_ord = a_mergle.cmp(&b_mergle);
                     TestResult::from_bool(mergle_ord == values_ord)
+                },
+                _ => {
+                    TestResult::discard()
+                }
+            }
+        }
+    }
+
+    quickcheck! {
+        fn test_append(a : Vec<MergleOp>, elem : U8) -> TestResult {
+            let table : MemTableRef<U8> = MemTableRef::new();
+            match make_mergle(&table, &a) {
+                Some(a_mergle) => {
+                    let mut a_values : Vec<&U8> = a_mergle.iter().collect();
+                    a_values.push(&elem);
+                    let appended = a_mergle.append(elem.clone());
+                    TestResult::from_bool(appended.iter().collect::<Vec<&U8>>() == a_values)
+                },
+                _ => {
+                    TestResult::discard()
+                }
+            }
+        }
+    }
+
+    quickcheck! {
+        fn test_prepend(a : Vec<MergleOp>, elem : U8) -> TestResult {
+            let table : MemTableRef<U8> = MemTableRef::new();
+            match make_mergle(&table, &a) {
+                Some(a_mergle) => {
+                    let mut a_values : Vec<&U8> = a_mergle.iter().collect();
+                    a_values.insert(0, &elem);
+                    let prepended = a_mergle.prepend(elem.clone());
+                    TestResult::from_bool(prepended.iter().collect::<Vec<&U8>>() == a_values)
                 },
                 _ => {
                     TestResult::discard()
