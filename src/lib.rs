@@ -145,6 +145,26 @@ impl<T: Ord + BrombergHashable> Node<T> {
             right: Rc::clone(other),
         })
     }
+
+    pub fn build_leaf(t: T) -> Self {
+        let h = t.bromberg_hash();
+        let node = LeafNode {
+            content: t,
+            hash: h,
+        };
+        Node::Leaf(node)
+    }
+
+    pub fn modify_right(&self, t: T) -> Rc<Self> {
+        let new_node = match self {
+            Node::Leaf(_) => Node::build_leaf(t),
+            Node::Internal(n) => {
+                let new_right = n.right.modify_right(t);
+                Node::merge(&n.left, &new_right)
+            }
+        };
+        Rc::new(new_node)
+    }
 }
 
 #[derive(Clone)]
@@ -195,14 +215,8 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
 impl<T: Ord + BrombergHashable> Mergle<T> {
     pub fn singleton(t: T, table: MemTableRef<T>) -> Mergle<T> {
-        let h = t.bromberg_hash();
-        let node = LeafNode {
-            content: t,
-            hash: h,
-        };
-
         Mergle {
-            root: Rc::new(Node::Leaf(node)),
+            root: Rc::new(Node::build_leaf(t)),
             table: table,
         }
     }
@@ -253,6 +267,13 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
                 table: self.table.clone(),
             }),
             PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
+        }
+    }
+
+    pub fn modify_last(&self, t: T) -> Mergle<T> {
+        Mergle {
+            root: self.root.modify_right(t),
+            table: self.table.clone(),
         }
     }
 }
@@ -419,6 +440,30 @@ mod tests {
             match (make_mergle(&table, &a), make_mergle(&table, &a)) {
                 (Some(a_mergle), Some(b_mergle)) => {
                     TestResult::from_bool(a_mergle == b_mergle)
+                },
+                _ => {
+                    TestResult::discard()
+                }
+            }
+        }
+    }
+
+    quickcheck! {
+        fn test_modify_last(ops : Vec<MergleOp>, elem : U8) -> TestResult {
+            let table : MemTableRef<U8> = MemTableRef::new();
+            match make_mergle(&table, &ops) {
+                Some(original) => {
+                    let last_elem = original.iter().last().unwrap();
+                    if last_elem == &elem {
+                        return TestResult::discard();
+                    }
+
+                    let modified = original.modify_last(elem.clone());
+                    let mut orig_values : Vec<&U8> = original.iter().collect();
+                    let orig_last = orig_values.pop().unwrap();
+                    let mut modified_values : Vec<&U8> = modified.iter().collect();
+                    let mod_last = modified_values.pop().unwrap();
+                    TestResult::from_bool(orig_values == modified_values && orig_last == last_elem && mod_last == &elem)
                 },
                 _ => {
                     TestResult::discard()
