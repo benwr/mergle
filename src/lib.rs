@@ -146,7 +146,7 @@ impl<T: Ord + BrombergHashable> Node<T> {
         })
     }
 
-    pub fn build_leaf(t: T) -> Self {
+    fn build_leaf(t: T) -> Self {
         let h = t.bromberg_hash();
         let node = LeafNode {
             content: t,
@@ -155,7 +155,7 @@ impl<T: Ord + BrombergHashable> Node<T> {
         Node::Leaf(node)
     }
 
-    pub fn modify_right(&self, t: T) -> Rc<Self> {
+    fn modify_right(&self, t: T) -> Rc<Self> {
         let new_node = match self {
             Node::Leaf(_) => Node::build_leaf(t),
             Node::Internal(n) => {
@@ -228,12 +228,12 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
         }
     }
 
-    pub fn append(&self, t: T) -> Mergle<T> {
+    pub fn push_right(&self, t: T) -> Mergle<T> {
         let elem = Mergle::singleton(t, self.table.clone());
         self.merge(&elem)
     }
 
-    pub fn prepend(&self, t: T) -> Mergle<T> {
+    pub fn push_left(&self, t: T) -> Mergle<T> {
         let elem = Mergle::singleton(t, self.table.clone());
         elem.merge(self)
     }
@@ -380,13 +380,13 @@ mod tests {
     }
 
     quickcheck! {
-        fn test_append(a : Vec<MergleOp>, elem : U8) -> TestResult {
+        fn test_push_right(a : Vec<MergleOp>, elem : U8) -> TestResult {
             let table : MemTableRef<U8> = MemTableRef::new();
             match make_mergle(&table, &a) {
                 Some(a_mergle) => {
                     let mut a_values : Vec<&U8> = a_mergle.iter().collect();
                     a_values.push(&elem);
-                    let appended = a_mergle.append(elem.clone());
+                    let appended = a_mergle.push_right(elem.clone());
                     TestResult::from_bool(appended.iter().collect::<Vec<&U8>>() == a_values)
                 },
                 _ => {
@@ -397,13 +397,13 @@ mod tests {
     }
 
     quickcheck! {
-        fn test_prepend(a : Vec<MergleOp>, elem : U8) -> TestResult {
+        fn test_push_left(a : Vec<MergleOp>, elem : U8) -> TestResult {
             let table : MemTableRef<U8> = MemTableRef::new();
             match make_mergle(&table, &a) {
                 Some(a_mergle) => {
                     let mut a_values : Vec<&U8> = a_mergle.iter().collect();
                     a_values.insert(0, &elem);
-                    let prepended = a_mergle.prepend(elem.clone());
+                    let prepended = a_mergle.push_left(elem.clone());
                     TestResult::from_bool(prepended.iter().collect::<Vec<&U8>>() == a_values)
                 },
                 _ => {
