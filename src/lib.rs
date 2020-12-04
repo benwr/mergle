@@ -155,6 +155,13 @@ impl<T: Ord + BrombergHashable> Node<T> {
         Node::Leaf(node)
     }
 
+    pub fn get_last(&self) -> &T {
+        match self {
+            Node::Leaf(t) => &t.content,
+            Node::Internal(n) => n.right.get_last(),
+        }
+    }
+
     fn modify_right(&self, t: T) -> Rc<Self> {
         let new_node = match self {
             Node::Leaf(_) => Node::build_leaf(t),
@@ -189,6 +196,7 @@ fn find_leftmost_leaf<'a, T>(
         }
     }
 }
+
 pub struct Iter<'a, T> {
     stack: Vec<(&'a InternalNode<T>, bool)>,
     tip: Option<&'a LeafNode<T>>,
@@ -268,6 +276,10 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
             }),
             PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
         }
+    }
+
+    pub fn get_last(&self) -> &T {
+        self.root.get_last()
     }
 
     pub fn modify_last(&self, t: T) -> Mergle<T> {
