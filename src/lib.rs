@@ -288,6 +288,34 @@ impl<T: Ord + BrombergHashable> Mergle<T> {
             table: self.table.clone(),
         }
     }
+
+    fn pop_right(node: &InternalNode<T>) -> (&T, Rc<Node<T>>) {
+        match &*node.right {
+            Node::Leaf(n) => {
+                let elem = &n.content;
+                (elem, node.left.clone())
+            }
+            Node::Internal(n) => {
+                let (elem, popped) = Mergle::pop_right(&n);
+                let new_node = node.left.merge(&popped);
+                (elem, Rc::new(new_node))
+            }
+        }
+    }
+
+    pub fn pop(&self) -> (&T, Option<Mergle<T>>) {
+        match &*self.root {
+            Node::Leaf(node) => (&node.content, None),
+            Node::Internal(node) => {
+                let (elem, popped) = Mergle::pop_right(&node);
+                let new_mergle = Mergle {
+                    root: popped,
+                    table: self.table.clone(),
+                };
+                (elem, Some(new_mergle))
+            }
+        }
+    }
 }
 
 impl<T: Ord + BrombergHashable> PartialEq for Mergle<T> {
@@ -476,6 +504,27 @@ mod tests {
                     let mut modified_values : Vec<&U8> = modified.iter().collect();
                     let mod_last = modified_values.pop().unwrap();
                     TestResult::from_bool(orig_values == modified_values && orig_last == last_elem && mod_last == &elem)
+                },
+                _ => {
+                    TestResult::discard()
+                }
+            }
+        }
+    }
+
+    quickcheck! {
+        fn test_pop(ops : Vec<MergleOp>, elem : U8) -> TestResult {
+            let table : MemTableRef<U8> = MemTableRef::new();
+            match make_mergle(&table, &ops) {
+                Some(original) => {
+                    let mut orig_values : Vec<&U8> = original.iter().collect();
+                    let orig_last = orig_values.pop().unwrap();
+                    let (last_elem, popped) = original.pop();
+                    let vecs_match = match popped {
+                        Some(mergle) => mergle.iter().collect::<Vec<&U8>>() == orig_values,
+                        None => orig_values.is_empty()
+                    };
+                    TestResult::from_bool(vecs_match && last_elem == orig_last)
                 },
                 _ => {
                     TestResult::discard()
