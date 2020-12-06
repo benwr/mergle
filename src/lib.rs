@@ -365,21 +365,21 @@ mod tests {
     }
 
     #[derive(Debug, Clone)]
-    enum MergleOp {
-        Singleton(U8),
+    enum MergleOp<T> {
+        Singleton(T),
         Merge(usize, usize),
     }
 
-    impl Arbitrary for MergleOp {
+    impl<T: Arbitrary> Arbitrary for MergleOp<T> {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             match bool::arbitrary(g) {
-                false => MergleOp::Singleton(U8(u8::arbitrary(g))),
+                false => MergleOp::Singleton(T::arbitrary(g)),
                 true => MergleOp::Merge(usize::arbitrary(g), usize::arbitrary(g)),
             }
         }
     }
 
-    fn make_mergle(table: &MemTableRef<U8>, vec: &[MergleOp]) -> Option<Mergle<U8>> {
+    fn make_mergle(table: &MemTableRef<U8>, vec: &[MergleOp<U8>]) -> Option<Mergle<U8>> {
         let mut mergles = Vec::new();
         for op in vec {
             let new_mergle = match op {
@@ -402,7 +402,7 @@ mod tests {
     }
 
     quickcheck! {
-        fn test_ord(a : Vec<MergleOp>, b : Vec<MergleOp>) -> TestResult {
+        fn test_ord(a : Vec<MergleOp<U8>>, b : Vec<MergleOp<U8>>) -> TestResult {
             let table : MemTableRef<U8> = MemTableRef::new();
             match (make_mergle(&table, &a), make_mergle(&table, &b)) {
                 (Some(a_mergle), Some(b_mergle)) => {
@@ -420,7 +420,7 @@ mod tests {
     }
 
     quickcheck! {
-        fn test_push_right(a : Vec<MergleOp>, elem : U8) -> TestResult {
+        fn test_push_right(a : Vec<MergleOp<U8>>, elem : U8) -> TestResult {
             let table : MemTableRef<U8> = MemTableRef::new();
             match make_mergle(&table, &a) {
                 Some(a_mergle) => {
@@ -437,7 +437,7 @@ mod tests {
     }
 
     quickcheck! {
-        fn test_push_left(a : Vec<MergleOp>, elem : U8) -> TestResult {
+        fn test_push_left(a : Vec<MergleOp<U8>>, elem : U8) -> TestResult {
             let table : MemTableRef<U8> = MemTableRef::new();
             match make_mergle(&table, &a) {
                 Some(a_mergle) => {
@@ -475,7 +475,7 @@ mod tests {
     }
 
     quickcheck! {
-        fn test_eq(a : Vec<MergleOp>) -> TestResult {
+        fn test_eq(a : Vec<MergleOp<U8>>) -> TestResult {
             let table : MemTableRef<U8> = MemTableRef::new();
             match (make_mergle(&table, &a), make_mergle(&table, &a)) {
                 (Some(a_mergle), Some(b_mergle)) => {
@@ -489,7 +489,7 @@ mod tests {
     }
 
     quickcheck! {
-        fn test_modify_last(ops : Vec<MergleOp>, elem : U8) -> TestResult {
+        fn test_modify_last(ops : Vec<MergleOp<U8>>, elem : U8) -> TestResult {
             let table : MemTableRef<U8> = MemTableRef::new();
             match make_mergle(&table, &ops) {
                 Some(original) => {
@@ -513,7 +513,7 @@ mod tests {
     }
 
     quickcheck! {
-        fn test_pop(ops : Vec<MergleOp>, elem : U8) -> TestResult {
+        fn test_pop(ops : Vec<MergleOp<U8>>, elem : U8) -> TestResult {
             let table : MemTableRef<U8> = MemTableRef::new();
             match make_mergle(&table, &ops) {
                 Some(original) => {
