@@ -1,8 +1,14 @@
-use std::cmp::Ordering;
-use std::collections::hash_map::HashMap;
+#![no_std]
 
-use std::cell::RefCell;
-use std::rc::Rc;
+#[macro_use]
+extern crate alloc;
+
+use alloc::collections::btree_map::BTreeMap;
+use alloc::vec::Vec;
+use alloc::rc::Rc;
+
+use core::cell::RefCell;
+use core::cmp::Ordering;
 
 use bromberg_sl2::*;
 
@@ -38,7 +44,7 @@ impl<T: Clone> Clone for PrefixDiff<T> {
     }
 }
 
-pub struct MemTableRef<T>(Rc<RefCell<HashMap<(HashMatrix, HashMatrix), PrefixDiff<Rc<Node<T>>>>>>);
+pub struct MemTableRef<T>(Rc<RefCell<BTreeMap<(HashMatrix, HashMatrix), PrefixDiff<Rc<Node<T>>>>>>);
 
 impl<T> Clone for MemTableRef<T> {
     fn clone(&self) -> Self {
@@ -48,7 +54,7 @@ impl<T> Clone for MemTableRef<T> {
 
 impl<T> MemTableRef<T> {
     pub fn new() -> Self {
-        MemTableRef(Rc::new(RefCell::new(HashMap::new())))
+        MemTableRef(Rc::new(RefCell::new(BTreeMap::new())))
     }
 
     fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixDiff<Rc<Node<T>>>) {
