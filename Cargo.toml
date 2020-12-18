@@ -7,7 +7,7 @@ edition = "2018"
 license = "CC0-1.0"
 description = "A data structure with fast merging and comparison"
 repository = "https://github.com/benwr/mergle"
-categories = ["data-structures"]
+categories = ["data-structures", "no-std"]
 
 [profile.release]
 lto = true
