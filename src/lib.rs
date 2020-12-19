@@ -85,8 +85,12 @@ pub struct Mergle<T: BrombergHashable + Clone> {
 fn prefix_diff_equals<T: BrombergHashable + Clone>(
     left: &FingerTree<Leaf<T>>,
     right: &FingerTree<Leaf<T>>
-) -> PrefixDiff<FingerTree<Leaf<T>>> {
-    panic!();
+) -> Ordering {
+    match (left.view_left(), right.view_left()) {
+        (None, None) => Ordering::Equal,
+        (Some(_), Some(_)) => panic!(),
+        _ => panic!("prefix_diff_equals unequal-length trees"),
+    }
 }
 
 fn size_split<T: BrombergHashable + Clone>(
@@ -103,23 +107,25 @@ fn prefix_diff<T: BrombergHashable + Clone>(
     let left_size = left.measure().1;
     let right_size = left.measure().1;
     match left_size.cmp(&right_size) {
-        Ordering::Equal => prefix_diff_equals(left, right),
+        Ordering::Equal => match prefix_diff_equals(left, right) {
+            Ordering::Less => PrefixDiff::LessThan,
+            Ordering::Equal => PrefixDiff::Equal,
+            Ordering::Greater => PrefixDiff::GreaterThan,
+        },
         Ordering::Less => {
             let (right_eq, right_suffix) = size_split(right, left_size);
             match prefix_diff_equals(left, &right_eq) {
-                PrefixDiff::LessThan => PrefixDiff::LessThan,
-                PrefixDiff::Equal => PrefixDiff::PrefixOf(right_suffix),
-                PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
-                _ => panic!("one equal-length sequence seems to be a prefix of another?")
+                Ordering::Less => PrefixDiff::LessThan,
+                Ordering::Equal => PrefixDiff::PrefixOf(right_suffix),
+                Ordering::Greater => PrefixDiff::GreaterThan,
             }
         }
         Ordering::Greater => {
             let (left_eq, left_suffix) = size_split(left, right_size);
             match prefix_diff_equals(&left_eq, right) {
-                PrefixDiff::LessThan => PrefixDiff::LessThan,
-                PrefixDiff::Equal => PrefixDiff::PrefixedBy(left_suffix),
-                PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
-                _ => panic!("one equal-length sequence seems to be a prefix of another?")
+                Ordering::Less => PrefixDiff::LessThan,
+                Ordering::Equal => PrefixDiff::PrefixedBy(left_suffix),
+                Ordering::Greater => PrefixDiff::GreaterThan,
             }
         }
     }
