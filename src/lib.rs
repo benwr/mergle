@@ -8,10 +8,10 @@ use core::cmp::Ordering;
 use im_rc::OrdSet;
 use num_bigint::BigUint;
 
-use bromberg_sl2::*;
-use fingertrees::rc::*;
-use fingertrees::measure::*;
-use fingertrees::monoid::*;
+use bromberg_sl2::{BrombergHashable, HashMatrix, I};
+use fingertrees::rc::FingerTree;
+use fingertrees::measure::Measured;
+use fingertrees::monoid::Monoid;
 
 pub enum PrefixDiff<T> {
     LessThan,
@@ -37,13 +37,13 @@ impl<T> PrefixDiff<T> {
 struct Annotation<T>(HashMatrix, BigUint, OrdSet<Leaf<T>>);
 impl<T: Clone> Monoid for Annotation<T> {
     fn unit() -> Self {
-        Annotation(I, BigUint::from(0u8), OrdSet::new())
+        Annotation(I, BigUint::from(0_u8), OrdSet::new())
     }
 
     fn join(&self, other: &Self) -> Self {
         Annotation(
             self.0 * other.0,
-            (&self.1 + &other.1).clone(),
+            &self.1 + &other.1,
             OrdSet::unions(vec![self.2.clone(), other.2.clone()])
         )
     }
@@ -54,7 +54,7 @@ struct Leaf<T>(T, HashMatrix);
 impl<T: BrombergHashable + Clone> Measured for Leaf<T> {
     type Measure = Annotation<T>;
     fn measure(&self) -> Self::Measure {
-        Annotation(self.1, BigUint::from(1u8), OrdSet::unit(self.clone()))
+        Annotation(self.1, BigUint::from(1_u8), OrdSet::unit(self.clone()))
     }
 }
 
@@ -82,12 +82,47 @@ pub struct Mergle<T: BrombergHashable + Clone> {
     tree: FingerTree<Leaf<T>>,
 }
 
+fn prefix_diff_equals<T: BrombergHashable + Clone>(
+    left: &FingerTree<Leaf<T>>,
+    right: &FingerTree<Leaf<T>>
+) -> PrefixDiff<FingerTree<Leaf<T>>> {
+    panic!();
+}
+
+fn size_split<T: BrombergHashable + Clone>(
+    t: &FingerTree<Leaf<T>>,
+    s: BigUint,
+) -> (FingerTree<Leaf<T>>, FingerTree<Leaf<T>>) {
+    t.split(|m| m.1 <= s)
+}
 
 fn prefix_diff<T: BrombergHashable + Clone>(
     left: &FingerTree<Leaf<T>>,
     right: &FingerTree<Leaf<T>>
 ) -> PrefixDiff<FingerTree<Leaf<T>>> {
-    panic!()
+    let left_size = left.measure().1;
+    let right_size = left.measure().1;
+    match left_size.cmp(&right_size) {
+        Ordering::Equal => prefix_diff_equals(left, right),
+        Ordering::Less => {
+            let (right_eq, right_suffix) = size_split(right, left_size);
+            match prefix_diff_equals(left, &right_eq) {
+                PrefixDiff::LessThan => PrefixDiff::LessThan,
+                PrefixDiff::Equal => PrefixDiff::PrefixOf(right_suffix),
+                PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
+                _ => panic!("one equal-length sequence seems to be a prefix of another?")
+            }
+        }
+        Ordering::Greater => {
+            let (left_eq, left_suffix) = size_split(left, right_size);
+            match prefix_diff_equals(&left_eq, right) {
+                PrefixDiff::LessThan => PrefixDiff::LessThan,
+                PrefixDiff::Equal => PrefixDiff::PrefixedBy(left_suffix),
+                PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
+                _ => panic!("one equal-length sequence seems to be a prefix of another?")
+            }
+        }
+    }
 }
 
 impl<T: BrombergHashable + Clone> Mergle<T> {
@@ -98,6 +133,7 @@ impl<T: BrombergHashable + Clone> Mergle<T> {
         }
     }
 
+    #[must_use]
     pub fn merge(&self, other: &Self) -> Self {
         Mergle {
             tree: self.tree.concat(&other.tree)
@@ -112,6 +148,7 @@ impl<T: BrombergHashable + Clone> Mergle<T> {
         self.tree.measure().2.into_iter().map(|l| l.0)
     }
 
+    #[must_use]
     pub fn prefix_diff(&self, other: &Self) -> PrefixDiff<Mergle<T>> {
         match prefix_diff(&self.tree, &other.tree) {
             PrefixDiff::LessThan => PrefixDiff::LessThan,
