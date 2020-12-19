@@ -37,11 +37,15 @@ impl<T> PrefixDiff<T> {
 struct Annotation<T>(HashMatrix, BigUint, OrdSet<Leaf<T>>);
 impl<T: Clone> Monoid for Annotation<T> {
     fn unit() -> Self {
-        Annotation(I, BigUint::from(1u8), OrdSet::new())
+        Annotation(I, BigUint::from(0u8), OrdSet::new())
     }
 
     fn join(&self, other: &Self) -> Self {
-        Annotation(self.0 * other.0, (&self.1 + &other.1).clone(), OrdSet::unions(vec![self.2.clone(), other.2.clone()]))
+        Annotation(
+            self.0 * other.0,
+            (&self.1 + &other.1).clone(),
+            OrdSet::unions(vec![self.2.clone(), other.2.clone()])
+        )
     }
 }
 
@@ -78,6 +82,14 @@ pub struct Mergle<T: BrombergHashable + Clone> {
     tree: FingerTree<Leaf<T>>,
 }
 
+
+fn prefix_diff<T: BrombergHashable + Clone>(
+    left: &FingerTree<Leaf<T>>,
+    right: &FingerTree<Leaf<T>>
+) -> PrefixDiff<FingerTree<Leaf<T>>> {
+    panic!()
+}
+
 impl<T: BrombergHashable + Clone> Mergle<T> {
     pub fn singleton(t: T) -> Mergle<T> {
         let h = t.bromberg_hash();
@@ -101,7 +113,13 @@ impl<T: BrombergHashable + Clone> Mergle<T> {
     }
 
     pub fn prefix_diff(&self, other: &Self) -> PrefixDiff<Mergle<T>> {
-        panic!()
+        match prefix_diff(&self.tree, &other.tree) {
+            PrefixDiff::LessThan => PrefixDiff::LessThan,
+            PrefixDiff::PrefixOf(t) => PrefixDiff::PrefixOf(Mergle{tree: t}),
+            PrefixDiff::Equal => PrefixDiff::Equal,
+            PrefixDiff::PrefixedBy(t) => PrefixDiff::PrefixedBy(Mergle{tree: t}),
+            PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
+        }
     }
 }
 
