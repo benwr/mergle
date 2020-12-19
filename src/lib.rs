@@ -82,13 +82,15 @@ pub struct Mergle<T: BrombergHashable + Clone> {
     tree: FingerTree<Leaf<T>>,
 }
 
-fn prefix_diff_equals<T: BrombergHashable + Clone>(
+fn prefix_diff_equals<T: BrombergHashable + Clone + Ord>(
     left: &FingerTree<Leaf<T>>,
     right: &FingerTree<Leaf<T>>
 ) -> Ordering {
     match (left.view_left(), right.view_left()) {
         (None, None) => Ordering::Equal,
-        (Some(_), Some(_)) => panic!(),
+        (Some((left_first, left_rest)), Some((right_first, right_rest))) => {
+            panic!()
+        },
         _ => panic!("prefix_diff_equals unequal-length trees"),
     }
 }
@@ -100,7 +102,7 @@ fn size_split<T: BrombergHashable + Clone>(
     t.split(|m| m.1 <= s)
 }
 
-fn prefix_diff<T: BrombergHashable + Clone>(
+fn prefix_diff<T: BrombergHashable + Clone + Ord>(
     left: &FingerTree<Leaf<T>>,
     right: &FingerTree<Leaf<T>>
 ) -> PrefixDiff<FingerTree<Leaf<T>>> {
