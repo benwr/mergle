@@ -3,6 +3,9 @@
 #[macro_use]
 extern crate alloc;
 
+#[cfg(test)]
+mod test;
+
 use core::cmp::Ordering;
 
 use im_rc::OrdSet;
