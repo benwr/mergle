@@ -21,18 +21,6 @@ pub enum PrefixDiff<T> {
     GreaterThan,
 }
 
-impl<T> PrefixDiff<T> {
-    fn inverse(self) -> PrefixDiff<T> {
-        match self {
-            PrefixDiff::LessThan => PrefixDiff::GreaterThan,
-            PrefixDiff::PrefixOf(suffix) => PrefixDiff::PrefixedBy(suffix),
-            PrefixDiff::Equal => PrefixDiff::Equal,
-            PrefixDiff::PrefixedBy(suffix) => PrefixDiff::PrefixOf(suffix),
-            PrefixDiff::GreaterThan => PrefixDiff::LessThan,
-        }
-    }
-}
-
 #[derive(Clone)]
 struct Annotation<T>(HashMatrix, BigUint, OrdSet<Leaf<T>>);
 impl<T: Clone> Monoid for Annotation<T> {
@@ -86,20 +74,40 @@ fn prefix_cmp_equals<T: BrombergHashable + Clone + Ord>(
     left: &FingerTree<Leaf<T>>,
     right: &FingerTree<Leaf<T>>
 ) -> Ordering {
+    let left_anno = left.measure();
+    if left_anno.0 == right.measure().0 {
+        return Ordering::Equal
+    }
+    let size = left_anno.1;
     match (left.view_left(), right.view_left()) {
         (None, None) => Ordering::Equal,
         (Some((left_first, left_rest)), Some((right_first, right_rest))) => {
-            panic!()
+            match left_first.cmp(&right_first) {
+                Ordering::Less => Ordering::Less,
+                Ordering::Greater => Ordering::Greater,
+                Ordering::Equal => {
+                    let new_size = (size - 1_u8) / 2_u8;
+                    let (left_left, left_right) = size_split(&left_rest, &new_size);
+                    let (right_left, right_right) = size_split(&right_rest, &new_size);
+                    match prefix_cmp_equals(&left_left, &right_left) {
+                        Ordering::Less => Ordering::Less,
+                        Ordering::Greater => Ordering::Greater,
+                        Ordering::Equal => {
+                            prefix_cmp_equals(&left_right, &right_right)
+                        }
+                    }
+                },
+            }
         },
-        _ => panic!("prefix_cmp_equals unequal-length trees"),
+        _ => panic!("prefix_cmp_equals on unequal-length trees"),
     }
 }
 
 fn size_split<T: BrombergHashable + Clone>(
     t: &FingerTree<Leaf<T>>,
-    s: BigUint,
+    s: &BigUint,
 ) -> (FingerTree<Leaf<T>>, FingerTree<Leaf<T>>) {
-    t.split(|m| m.1 <= s)
+    t.split(|m| &m.1 <= s)
 }
 
 fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
@@ -115,7 +123,7 @@ fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
             Ordering::Greater => PrefixDiff::GreaterThan,
         },
         Ordering::Less => {
-            let (right_eq, right_suffix) = size_split(right, left_size);
+            let (right_eq, right_suffix) = size_split(right, &left_size);
             match prefix_cmp_equals(left, &right_eq) {
                 Ordering::Less => PrefixDiff::LessThan,
                 Ordering::Equal => PrefixDiff::PrefixOf(right_suffix),
@@ -123,7 +131,7 @@ fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
             }
         }
         Ordering::Greater => {
-            let (left_eq, left_suffix) = size_split(left, right_size);
+            let (left_eq, left_suffix) = size_split(left, &right_size);
             match prefix_cmp_equals(&left_eq, right) {
                 Ordering::Less => PrefixDiff::LessThan,
                 Ordering::Equal => PrefixDiff::PrefixedBy(left_suffix),
