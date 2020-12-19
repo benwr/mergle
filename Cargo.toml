@@ -15,7 +15,10 @@ opt-level = 3
 codegen-units = 1
 
 [dependencies]
-bromberg_sl2 = "0.4"
+bromberg_sl2 = "^0.4.4"
+fingertrees = "^0.2.4"
+im-rc = "^15.0"
+num-bigint = "^0.3.1"
 
 [dev-dependencies]
 quickcheck = "0.9"
