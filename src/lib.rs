@@ -82,7 +82,7 @@ pub struct Mergle<T: BrombergHashable + Clone> {
     tree: FingerTree<Leaf<T>>,
 }
 
-fn prefix_diff_equals<T: BrombergHashable + Clone + Ord>(
+fn prefix_cmp_equals<T: BrombergHashable + Clone + Ord>(
     left: &FingerTree<Leaf<T>>,
     right: &FingerTree<Leaf<T>>
 ) -> Ordering {
@@ -91,7 +91,7 @@ fn prefix_diff_equals<T: BrombergHashable + Clone + Ord>(
         (Some((left_first, left_rest)), Some((right_first, right_rest))) => {
             panic!()
         },
-        _ => panic!("prefix_diff_equals unequal-length trees"),
+        _ => panic!("prefix_cmp_equals unequal-length trees"),
     }
 }
 
@@ -102,21 +102,21 @@ fn size_split<T: BrombergHashable + Clone>(
     t.split(|m| m.1 <= s)
 }
 
-fn prefix_diff<T: BrombergHashable + Clone + Ord>(
+fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
     left: &FingerTree<Leaf<T>>,
     right: &FingerTree<Leaf<T>>
 ) -> PrefixDiff<FingerTree<Leaf<T>>> {
     let left_size = left.measure().1;
     let right_size = left.measure().1;
     match left_size.cmp(&right_size) {
-        Ordering::Equal => match prefix_diff_equals(left, right) {
+        Ordering::Equal => match prefix_cmp_equals(left, right) {
             Ordering::Less => PrefixDiff::LessThan,
             Ordering::Equal => PrefixDiff::Equal,
             Ordering::Greater => PrefixDiff::GreaterThan,
         },
         Ordering::Less => {
             let (right_eq, right_suffix) = size_split(right, left_size);
-            match prefix_diff_equals(left, &right_eq) {
+            match prefix_cmp_equals(left, &right_eq) {
                 Ordering::Less => PrefixDiff::LessThan,
                 Ordering::Equal => PrefixDiff::PrefixOf(right_suffix),
                 Ordering::Greater => PrefixDiff::GreaterThan,
@@ -124,7 +124,7 @@ fn prefix_diff<T: BrombergHashable + Clone + Ord>(
         }
         Ordering::Greater => {
             let (left_eq, left_suffix) = size_split(left, right_size);
-            match prefix_diff_equals(&left_eq, right) {
+            match prefix_cmp_equals(&left_eq, right) {
                 Ordering::Less => PrefixDiff::LessThan,
                 Ordering::Equal => PrefixDiff::PrefixedBy(left_suffix),
                 Ordering::Greater => PrefixDiff::GreaterThan,
@@ -155,10 +155,12 @@ impl<T: BrombergHashable + Clone> Mergle<T> {
     pub fn unique_elems(&self) -> impl Iterator<Item=T> + '_ {
         self.tree.measure().2.into_iter().map(|l| l.0)
     }
+}
 
+impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
     #[must_use]
-    pub fn prefix_diff(&self, other: &Self) -> PrefixDiff<Mergle<T>> {
-        match prefix_diff(&self.tree, &other.tree) {
+    pub fn prefix_cmp(&self, other: &Self) -> PrefixDiff<Mergle<T>> {
+        match prefix_cmp(&self.tree, &other.tree) {
             PrefixDiff::LessThan => PrefixDiff::LessThan,
             PrefixDiff::PrefixOf(t) => PrefixDiff::PrefixOf(Mergle{tree: t}),
             PrefixDiff::Equal => PrefixDiff::Equal,
@@ -168,9 +170,9 @@ impl<T: BrombergHashable + Clone> Mergle<T> {
     }
 }
 
-impl<T: BrombergHashable + Clone> Ord for Mergle<T> {
+impl<T: BrombergHashable + Clone + Ord> Ord for Mergle<T> {
     fn cmp(&self, other: &Self) -> Ordering {
-        match self.prefix_diff(other) {
+        match self.prefix_cmp(other) {
             PrefixDiff::LessThan | PrefixDiff::PrefixOf(_) => Ordering::Less,
             PrefixDiff::Equal => Ordering::Equal,
             PrefixDiff::PrefixedBy(_) | PrefixDiff::GreaterThan => Ordering::Greater,
@@ -178,16 +180,16 @@ impl<T: BrombergHashable + Clone> Ord for Mergle<T> {
     }
 }
 
-impl<T: BrombergHashable + Clone> PartialOrd for Mergle<T> {
+impl<T: BrombergHashable + Clone + Ord> PartialOrd for Mergle<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T: BrombergHashable + Clone> PartialEq for Mergle<T> {
+impl<T: BrombergHashable + Clone + Ord> PartialEq for Mergle<T> {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl<T: BrombergHashable + Clone> Eq for Mergle<T> {}
+impl<T: BrombergHashable + Clone + Ord> Eq for Mergle<T> {}
