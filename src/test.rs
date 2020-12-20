@@ -5,7 +5,6 @@ use alloc::vec::Vec;
 use bromberg_sl2::*;
 use quickcheck::*;
 
-
 #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Debug)]
 struct U8(pub u8);
 
