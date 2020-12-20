@@ -193,7 +193,7 @@ impl<T: BrombergHashable + Clone> Mergle<T> {
     pub fn pop(&self) -> (T, Option<Mergle<T>>) {
         match self.tree.view_right() {
             Some((v, r)) => {
-                if r.measure().size > BigUint::from(0_u8) {
+                if !r.is_empty() {
                     (v.0, Some(Mergle{ tree: r }))
                 } else {
                     (v.0, None)
