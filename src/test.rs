@@ -89,8 +89,12 @@ fn ord_regression() {
     {
         let a_values: Vec<U8> = a_mergle.iter().collect();
         let b_values: Vec<U8> = b_mergle.iter().collect();
+        println!("{:?}", a_values);
+        println!("{:?}", b_values);
         let values_ord = a_values.cmp(&b_values);
         let mergle_ord = a_mergle.cmp(&b_mergle);
+        println!("{:?}", values_ord);
+        println!("{:?}", mergle_ord);
         assert_eq!(mergle_ord, values_ord);
     }
 }

@@ -1,4 +1,11 @@
+/*
 #![no_std]
+
+
+#[cfg(test)]
+#[macro_use]
+extern crate std;
+*/
 
 #[macro_use]
 extern crate alloc;
@@ -25,18 +32,27 @@ pub enum PrefixDiff<T> {
 }
 
 #[derive(Clone)]
-struct Annotation<T>(HashMatrix, BigUint, OrdSet<Leaf<T>>);
+struct Annotation<T> {
+    hash: HashMatrix,
+    size: BigUint,
+    contents: OrdSet<Leaf<T>>,
+}
+
 impl<T: Clone> Monoid for Annotation<T> {
     fn unit() -> Self {
-        Annotation(I, BigUint::from(0_u8), OrdSet::new())
+        Annotation{
+            hash: I,
+            size: BigUint::from(0_u8),
+            contents: OrdSet::new(),
+        }
     }
 
     fn join(&self, other: &Self) -> Self {
-        Annotation(
-            self.0 * other.0,
-            &self.1 + &other.1,
-            OrdSet::unions(vec![self.2.clone(), other.2.clone()])
-        )
+        Annotation{
+            hash: self.hash * other.hash,
+            size: &self.size + &other.size,
+            contents: OrdSet::unions(vec![self.contents.clone(), other.contents.clone()])
+        }
     }
 }
 
@@ -45,7 +61,11 @@ struct Leaf<T>(T, HashMatrix);
 impl<T: BrombergHashable + Clone> Measured for Leaf<T> {
     type Measure = Annotation<T>;
     fn measure(&self) -> Self::Measure {
-        Annotation(self.1, BigUint::from(1_u8), OrdSet::unit(self.clone()))
+        Annotation{
+            hash: self.1,
+            size: BigUint::from(1_u8),
+            contents: OrdSet::unit(self.clone()),
+        }
     }
 }
 
@@ -63,7 +83,7 @@ impl<T> PartialOrd for Leaf<T> {
 
 impl<T> PartialEq for Leaf<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.1.cmp(&other.1) == Ordering::Equal
+        self.cmp(&other) == Ordering::Equal
     }
 }
 
@@ -78,24 +98,26 @@ fn prefix_cmp_equals<T: BrombergHashable + Clone + Ord>(
     right: &FingerTree<Leaf<T>>
 ) -> Ordering {
     let left_anno = left.measure();
-    if left_anno.0 == right.measure().0 {
+    if left_anno.hash == right.measure().hash {
         return Ordering::Equal
     }
-    let size = left_anno.1;
+    let size = left_anno.size;
     match (left.view_left(), right.view_left()) {
         (None, None) => Ordering::Equal,
         (Some((left_first, left_rest)), Some((right_first, right_rest))) => {
-            match left_first.cmp(&right_first) {
+            match left_first.0.cmp(&right_first.0) {
                 Ordering::Less => Ordering::Less,
                 Ordering::Greater => Ordering::Greater,
                 Ordering::Equal => {
                     let new_size = (size - 1_u8) / 2_u8;
                     let (left_left, left_right) = size_split(&left_rest, &new_size);
                     let (right_left, right_right) = size_split(&right_rest, &new_size);
+                    debug_assert!(left_left.measure().size == right_left.measure().size);
                     match prefix_cmp_equals(&left_left, &right_left) {
                         Ordering::Less => Ordering::Less,
                         Ordering::Greater => Ordering::Greater,
                         Ordering::Equal => {
+                            debug_assert!(left_right.measure().size == right_right.measure().size);
                             prefix_cmp_equals(&left_right, &right_right)
                         }
                     }
@@ -110,23 +132,24 @@ fn size_split<T: BrombergHashable + Clone>(
     t: &FingerTree<Leaf<T>>,
     s: &BigUint,
 ) -> (FingerTree<Leaf<T>>, FingerTree<Leaf<T>>) {
-    t.split(|m| &m.1 <= s)
+    t.split(|m| &m.size > s)
 }
 
 fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
     left: &FingerTree<Leaf<T>>,
     right: &FingerTree<Leaf<T>>
 ) -> PrefixDiff<FingerTree<Leaf<T>>> {
-    let left_size = left.measure().1;
-    let right_size = left.measure().1;
+    let left_size = left.measure().size;
+    let right_size = right.measure().size;
     match left_size.cmp(&right_size) {
         Ordering::Equal => match prefix_cmp_equals(left, right) {
-            Ordering::Less => PrefixDiff::LessThan,
-            Ordering::Equal => PrefixDiff::Equal,
-            Ordering::Greater => PrefixDiff::GreaterThan,
+                Ordering::Less => PrefixDiff::LessThan,
+                Ordering::Equal => PrefixDiff::Equal,
+                Ordering::Greater => PrefixDiff::GreaterThan,
         },
         Ordering::Less => {
             let (right_eq, right_suffix) = size_split(right, &left_size);
+            debug_assert!(right_eq.measure().size == left_size);
             match prefix_cmp_equals(left, &right_eq) {
                 Ordering::Less => PrefixDiff::LessThan,
                 Ordering::Equal => PrefixDiff::PrefixOf(right_suffix),
@@ -135,6 +158,7 @@ fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
         }
         Ordering::Greater => {
             let (left_eq, left_suffix) = size_split(left, &right_size);
+            debug_assert!(left_eq.measure().size == right_size);
             match prefix_cmp_equals(&left_eq, right) {
                 Ordering::Less => PrefixDiff::LessThan,
                 Ordering::Equal => PrefixDiff::PrefixedBy(left_suffix),
@@ -164,7 +188,7 @@ impl<T: BrombergHashable + Clone> Mergle<T> {
     }
 
     pub fn unique_elems(&self) -> impl Iterator<Item=T> + '_ {
-        self.tree.measure().2.into_iter().map(|l| l.0)
+        self.tree.measure().contents.into_iter().map(|l| l.0)
     }
 }
 
