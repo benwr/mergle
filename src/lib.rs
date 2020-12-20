@@ -5,7 +5,6 @@
 #[macro_use]
 extern crate std;
 
-#[macro_use]
 extern crate alloc;
 
 #[cfg(test)]
@@ -13,7 +12,6 @@ mod test;
 
 use core::cmp::Ordering;
 
-use im_rc::OrdSet;
 use num_bigint::BigUint;
 
 use bromberg_sl2::{BrombergHashable, HashMatrix, I};
@@ -30,18 +28,16 @@ pub enum PrefixDiff<T> {
 }
 
 #[derive(Clone)]
-struct Annotation<T> {
+struct Annotation {
     hash: HashMatrix,
     size: BigUint,
-    contents: OrdSet<Leaf<T>>,
 }
 
-impl<T: Clone> Monoid for Annotation<T> {
+impl Monoid for Annotation {
     fn unit() -> Self {
         Annotation{
             hash: I,
             size: BigUint::from(0_u8),
-            contents: OrdSet::new(),
         }
     }
 
@@ -49,7 +45,6 @@ impl<T: Clone> Monoid for Annotation<T> {
         Annotation{
             hash: self.hash * other.hash,
             size: &self.size + &other.size,
-            contents: OrdSet::unions(vec![self.contents.clone(), other.contents.clone()])
         }
     }
 }
@@ -57,12 +52,11 @@ impl<T: Clone> Monoid for Annotation<T> {
 #[derive(Clone)]
 struct Leaf<T>(T, HashMatrix);
 impl<T: BrombergHashable + Clone> Measured for Leaf<T> {
-    type Measure = Annotation<T>;
+    type Measure = Annotation;
     fn measure(&self) -> Self::Measure {
         Annotation{
             hash: self.1,
             size: BigUint::from(1_u8),
-            contents: OrdSet::unit(self.clone()),
         }
     }
 }
@@ -186,17 +180,14 @@ impl<T: BrombergHashable + Clone> Mergle<T> {
         self.tree.iter().map(|l| l.0)
     }
 
-    pub fn unique_elems(&self) -> impl Iterator<Item=T> + '_ {
-        self.tree.measure().contents.into_iter().map(|l| l.0)
-    }
-
+    #[must_use]
     pub fn pop(&self) -> (T, Option<Mergle<T>>) {
         match self.tree.view_right() {
             Some((v, r)) => {
-                if !r.is_empty() {
-                    (v.0, Some(Mergle{ tree: r }))
-                } else {
+                if r.is_empty() {
                     (v.0, None)
+                } else {
+                    (v.0, Some(Mergle{ tree: r }))
                 }
             },
             None => panic!("Attempt to pop from empty tree"),
