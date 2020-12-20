@@ -89,6 +89,7 @@ impl<T> PartialEq for Leaf<T> {
 
 impl<T> Eq for Leaf<T> {}
 
+#[derive(Clone)]
 pub struct Mergle<T: BrombergHashable + Clone> {
     tree: FingerTree<Leaf<T>>,
 }
@@ -189,6 +190,19 @@ impl<T: BrombergHashable + Clone> Mergle<T> {
 
     pub fn unique_elems(&self) -> impl Iterator<Item=T> + '_ {
         self.tree.measure().contents.into_iter().map(|l| l.0)
+    }
+
+    pub fn pop(&self) -> (T, Option<Mergle<T>>) {
+        match self.tree.view_right() {
+            Some((v, r)) => {
+                if r.measure().size > BigUint::from(0_u8) {
+                    (v.0, Some(Mergle{ tree: r }))
+                } else {
+                    (v.0, None)
+                }
+            },
+            None => panic!("Attempt to pop from empty tree"),
+        }
     }
 }
 
