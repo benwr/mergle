@@ -90,33 +90,23 @@ fn prefix_cmp_equals<T: BrombergHashable + Clone + Ord>(
     right: &FingerTree<Leaf<T>>
 ) -> Ordering {
     let left_anno = left.measure();
-    if left_anno.hash == right.measure().hash {
+    if left_anno.hash == right.measure().hash || left.is_empty() {
         return Ordering::Equal
     }
     let size = left_anno.size;
-    match (left.view_left(), right.view_left()) {
-        (None, None) => Ordering::Equal,
-        (Some((left_first, left_rest)), Some((right_first, right_rest))) => {
-            match left_first.0.cmp(&right_first.0) {
-                Ordering::Less => Ordering::Less,
-                Ordering::Greater => Ordering::Greater,
-                Ordering::Equal => {
-                    let new_size = (size - 1_u8) / 2_u8;
-                    let (left_left, left_right) = size_split(&left_rest, &new_size);
-                    let (right_left, right_right) = size_split(&right_rest, &new_size);
-                    debug_assert!(left_left.measure().size == right_left.measure().size);
-                    match prefix_cmp_equals(&left_left, &right_left) {
-                        Ordering::Less => Ordering::Less,
-                        Ordering::Greater => Ordering::Greater,
-                        Ordering::Equal => {
-                            debug_assert!(left_right.measure().size == right_right.measure().size);
-                            prefix_cmp_equals(&left_right, &right_right)
-                        }
-                    }
-                },
-            }
-        },
-        _ => panic!("prefix_cmp_equals on unequal-length trees"),
+    if size == BigUint::from(1_u8) {
+        let left_thing = left.view_left().unwrap().0;
+        let right_thing = right.view_left().unwrap().0;
+        left_thing.0.cmp(&right_thing.0)
+    } else {
+        let new_size = size / 2_u8;
+        let (left_left, left_right) = size_split(&left, &new_size);
+        let (right_left, right_right) = size_split(&right, &new_size);
+        match prefix_cmp_equals(&left_left, &right_left) {
+            Ordering::Less => Ordering::Less,
+            Ordering::Greater => Ordering::Greater,
+            Ordering::Equal => prefix_cmp_equals(&left_right, &right_right)
+        }
     }
 }
 
@@ -135,13 +125,12 @@ fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
     let right_size = right.measure().size;
     match left_size.cmp(&right_size) {
         Ordering::Equal => match prefix_cmp_equals(left, right) {
-                Ordering::Less => PrefixDiff::LessThan,
-                Ordering::Equal => PrefixDiff::Equal,
-                Ordering::Greater => PrefixDiff::GreaterThan,
+            Ordering::Less => PrefixDiff::LessThan,
+            Ordering::Equal => PrefixDiff::Equal,
+            Ordering::Greater => PrefixDiff::GreaterThan,
         },
         Ordering::Less => {
             let (right_eq, right_suffix) = size_split(right, &left_size);
-            debug_assert!(right_eq.measure().size == left_size);
             match prefix_cmp_equals(left, &right_eq) {
                 Ordering::Less => PrefixDiff::LessThan,
                 Ordering::Equal => PrefixDiff::PrefixOf(right_suffix),
@@ -150,7 +139,6 @@ fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
         }
         Ordering::Greater => {
             let (left_eq, left_suffix) = size_split(left, &right_size);
-            debug_assert!(left_eq.measure().size == right_size);
             match prefix_cmp_equals(&left_eq, right) {
                 Ordering::Less => PrefixDiff::LessThan,
                 Ordering::Equal => PrefixDiff::PrefixedBy(left_suffix),

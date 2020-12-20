@@ -95,6 +95,23 @@ fn ord_regression() {
     }
 }
 
+#[test]
+fn ord_regression_2() {
+    let a = vec![MergleOp::Singleton(U8(30))];
+    let b = vec![MergleOp::Singleton(U8(39))];
+
+    if let (Some(a_mergle), Some(b_mergle)) = (make_mergle(&a), make_mergle(&b))
+    {
+        let a_values: Vec<U8> = a_mergle.iter().collect();
+        let b_values: Vec<U8> = b_mergle.iter().collect();
+        println!("{:?}", a_values);
+        println!("{:?}", b_values);
+        let values_ord = a_values.cmp(&b_values);
+        let mergle_ord = a_mergle.cmp(&b_mergle);
+        assert_eq!(mergle_ord, values_ord);
+    }
+}
+
 quickcheck! {
     fn test_eq(a : Vec<MergleOp<U8>>) -> TestResult {
         match (make_mergle(&a), make_mergle(&a)) {
