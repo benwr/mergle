@@ -111,3 +111,23 @@ quickcheck! {
         }
     }
 }
+
+quickcheck! {
+    fn test_pop(ops : Vec<MergleOp<U8>>, elem : U8) -> TestResult {
+        match make_mergle(&ops) {
+            Some(original) => {
+                let mut orig_values : Vec<U8> = original.iter().collect();
+                let orig_last = orig_values.pop().unwrap();
+                let (last_elem, popped) = original.pop();
+                let vecs_match = match popped {
+                    Some(mergle) => mergle.iter().collect::<Vec<U8>>() == orig_values,
+                    None => orig_values.is_empty()
+                };
+                TestResult::from_bool(vecs_match && last_elem == orig_last)
+            },
+            _ => {
+                TestResult::discard()
+            }
+        }
+    }
+}
