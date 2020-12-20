@@ -1,6 +1,5 @@
 #![no_std]
 
-
 #[cfg(test)]
 #[macro_use]
 extern crate std;
@@ -11,6 +10,8 @@ extern crate alloc;
 mod test;
 
 use core::cmp::Ordering;
+
+use alloc::rc::Rc;
 
 use num_bigint::BigUint;
 
@@ -30,21 +31,21 @@ pub enum PrefixDiff<T> {
 #[derive(Clone)]
 struct Annotation {
     hash: HashMatrix,
-    size: BigUint,
+    size: Rc<BigUint>,
 }
 
 impl Monoid for Annotation {
     fn unit() -> Self {
         Annotation{
             hash: I,
-            size: BigUint::from(0_u8),
+            size: Rc::new(BigUint::from(0_u8)),
         }
     }
 
     fn join(&self, other: &Self) -> Self {
         Annotation{
             hash: self.hash * other.hash,
-            size: &self.size + &other.size,
+            size: Rc::new(&*self.size + &*other.size),
         }
     }
 }
@@ -56,7 +57,7 @@ impl<T: BrombergHashable + Clone> Measured for Leaf<T> {
     fn measure(&self) -> Self::Measure {
         Annotation{
             hash: self.1,
-            size: BigUint::from(1_u8),
+            size: Rc::new(BigUint::from(1_u8)),
         }
     }
 }
@@ -102,7 +103,7 @@ fn prefix_cmp_equals<T: BrombergHashable + Clone + Ord>(
                 Ordering::Less => Ordering::Less,
                 Ordering::Greater => Ordering::Greater,
                 Ordering::Equal => {
-                    let new_size = (size - 1_u8) / 2_u8;
+                    let new_size = (&*size - 1_u8) / 2_u8;
                     let (left_left, left_right) = size_split(&left_rest, &new_size);
                     let (right_left, right_right) = size_split(&right_rest, &new_size);
                     debug_assert!(left_left.measure().size == right_left.measure().size);
@@ -125,7 +126,7 @@ fn size_split<T: BrombergHashable + Clone>(
     t: &FingerTree<Leaf<T>>,
     s: &BigUint,
 ) -> (FingerTree<Leaf<T>>, FingerTree<Leaf<T>>) {
-    t.split(|m| &m.size > s)
+    t.split(|m| *m.size > *s)
 }
 
 fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
