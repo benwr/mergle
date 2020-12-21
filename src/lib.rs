@@ -1,4 +1,4 @@
-#![no_std]
+//#![no_std]
 
 #[cfg(test)]
 #[macro_use]
@@ -15,6 +15,7 @@ use core::cell::RefCell;
 use core::cmp::Ordering;
 
 use num_bigint::BigUint;
+use num_traits::pow::*;
 
 use bromberg_sl2::{BrombergHashable, HashMatrix, I};
 use fingertrees::rc::FingerTree;
@@ -143,7 +144,8 @@ fn prefix_cmp_equals<T: BrombergHashable + Clone + Ord>(
         let right_thing = right.view_left().unwrap().0;
         left_thing.0.cmp(&right_thing.0)
     } else {
-        let new_size = size / 2_u8;
+        let div = pow(BigUint::from(2u8), (&size.bits() - 1) as usize);
+        let new_size = size / div;
         let (left_left, left_right) = size_split(&left, &new_size);
         let (right_left, right_right) = size_split(&right, &new_size);
         match prefix_cmp_equals(&left_left, &right_left, table) {
