@@ -144,7 +144,7 @@ fn prefix_cmp_equals<T: BrombergHashable + Clone + Ord>(
         let right_thing = right.view_left().unwrap().0;
         left_thing.0.cmp(&right_thing.0)
     } else {
-        let new_size = BigUint::from(1u8) << (size.bits() - 3);
+        let new_size = BigUint::from(1u8) << (size.bits().saturating_sub(3));
         let (left_left, left_right) = size_split(&left, &new_size);
         let (right_left, right_right) = size_split(&right, &new_size);
         match prefix_cmp_equals(&left_left, &right_left, table) {
