@@ -14,12 +14,7 @@ use alloc::rc::Rc;
 use core::cell::RefCell;
 use core::cmp::Ordering;
 
-use num_bigint::BigUint;
-
 use bromberg_sl2::{BrombergHashable, HashMatrix, I};
-use fingertrees::rc::FingerTree;
-use fingertrees::measure::Measured;
-use fingertrees::monoid::Monoid;
 
 pub struct MemTableRef(Rc<RefCell<BTreeMap<(HashMatrix, HashMatrix), Ordering>>>);
 
@@ -66,182 +61,134 @@ pub enum PrefixDiff<T> {
     GreaterThan,
 }
 
-#[derive(Clone)]
-struct Annotation {
+struct MergleNode<T> {
+    elem: T,
+    elem_hash: HashMatrix,
+    height: usize,
     hash: HashMatrix,
-    size: BigUint,
+    left: Option<Rc<MergleNode<T>>>,
+    right: Option<Rc<MergleNode<T>>>,
 }
 
-impl Monoid for Annotation {
-    fn unit() -> Self {
-        Annotation{
-            hash: I,
-            size: BigUint::from(0_u8),
+impl<T: BrombergHashable + Clone> MergleNode<T> {
+    fn singleton(e: T) -> MergleNode<T> {
+        let h = e.bromberg_hash();
+        MergleNode {
+            elem: e,
+            elem_hash: h,
+            height: 1,
+            hash: h,
+            left: None,
+            right: None,
         }
     }
 
-    fn join(&self, other: &Self) -> Self {
-        Annotation{
-            hash: self.hash * other.hash,
-            size: &self.size + &other.size,
+    fn height(t: &Option<Rc<MergleNode<T>>>) -> usize {
+        match t {
+            None => 0,
+            Some(p) => p.height,
         }
     }
-}
 
-#[derive(Clone)]
-struct Leaf<T>(T, HashMatrix);
-impl<T: BrombergHashable + Clone> Measured for Leaf<T> {
-    type Measure = Annotation;
-    fn measure(&self) -> Self::Measure {
-        Annotation{
-            hash: self.1,
-            size: BigUint::from(1_u8),
+    fn hash(t: &Option<Rc<MergleNode<T>>>) -> HashMatrix {
+        match t {
+            None => I,
+            Some(p) => p.hash,
         }
     }
-}
 
-impl<T> Ord for Leaf<T> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.1.cmp(&other.1)
-    }
-}
+    fn rotate_left(&self) -> MergleNode<T> {
+        let right: &Rc<MergleNode<T>> = self.right.as_ref().unwrap();
 
-impl<T> PartialOrd for Leaf<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
+        let left_height = 1 + usize::max(
+            Self::height(&self.left),
+            Self::height(&right.left));
+        let total_height = usize::max(1 + left_height, right.height);
 
-impl<T> PartialEq for Leaf<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(&other) == Ordering::Equal
-    }
-}
-
-impl<T> Eq for Leaf<T> {}
-
-#[derive(Clone)]
-pub struct Mergle<T: BrombergHashable + Clone> {
-    tree: FingerTree<Leaf<T>>,
-    table: MemTableRef,
-}
-
-fn prefix_cmp_equals<T: BrombergHashable + Clone + Ord>(
-    left: &FingerTree<Leaf<T>>,
-    right: &FingerTree<Leaf<T>>,
-    table: &MemTableRef,
-) -> Ordering {
-    let left_anno = left.measure();
-    let left_hash = left_anno.hash;
-    let right_hash = right.measure().hash;
-    if let Some(result) = table.lookup(left_hash, right_hash) {
-        return result
-    }
-    let size = left_anno.size;
-    let result = if size == BigUint::from(1_u8) {
-        let left_thing = left.view_left().unwrap().0;
-        let right_thing = right.view_left().unwrap().0;
-        left_thing.0.cmp(&right_thing.0)
-    } else {
-        let new_size = BigUint::from(1u8) << (size.bits() - 2);
-        let (left_left, left_right) = size_split(&left, &new_size);
-        let (right_left, right_right) = size_split(&right, &new_size);
-        match prefix_cmp_equals(&left_left, &right_left, table) {
-            Ordering::Less => Ordering::Less,
-            Ordering::Greater => Ordering::Greater,
-            Ordering::Equal => prefix_cmp_equals(&left_right, &right_right, table)
-        }
-    };
-
-    table.insert(left_hash, right_hash, result);
-    result
-}
-
-fn size_split<T: BrombergHashable + Clone>(
-    t: &FingerTree<Leaf<T>>,
-    s: &BigUint,
-) -> (FingerTree<Leaf<T>>, FingerTree<Leaf<T>>) {
-    t.split(|m| m.size > *s)
-}
-
-fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
-    left: &FingerTree<Leaf<T>>,
-    right: &FingerTree<Leaf<T>>,
-    table: &MemTableRef,
-) -> PrefixDiff<FingerTree<Leaf<T>>> {
-    let left_size = left.measure().size;
-    let right_size = right.measure().size;
-    match left_size.cmp(&right_size) {
-        Ordering::Equal => match prefix_cmp_equals(left, right, table) {
-            Ordering::Less => PrefixDiff::LessThan,
-            Ordering::Equal => PrefixDiff::Equal,
-            Ordering::Greater => PrefixDiff::GreaterThan,
-        },
-        Ordering::Less => {
-            let (right_eq, right_suffix) = size_split(right, &left_size);
-            match prefix_cmp_equals(left, &right_eq, table) {
-                Ordering::Less => PrefixDiff::LessThan,
-                Ordering::Equal => PrefixDiff::PrefixOf(right_suffix),
-                Ordering::Greater => PrefixDiff::GreaterThan,
-            }
-        }
-        Ordering::Greater => {
-            let (left_eq, left_suffix) = size_split(left, &right_size);
-            match prefix_cmp_equals(&left_eq, right, table) {
-                Ordering::Less => PrefixDiff::LessThan,
-                Ordering::Equal => PrefixDiff::PrefixedBy(left_suffix),
-                Ordering::Greater => PrefixDiff::GreaterThan,
-            }
+        MergleNode {
+            hash: self.hash,
+            height: total_height,
+            elem: right.elem.clone(),
+            elem_hash: right.elem_hash,
+            left: Some(Rc::new(MergleNode {
+                hash: Self::hash(&self.left) * self.elem_hash * Self::hash(&right.left),
+                height: left_height,
+                elem: self.elem.clone(),
+                elem_hash: self.elem_hash,
+                left: self.left.clone(),
+                right: right.left.clone(),
+            })),
+            right: right.right.clone(),
         }
     }
+
+
+    fn rotate_right(&self) -> MergleNode<T> {
+        let left: &Rc<MergleNode<T>> = self.left.as_ref().unwrap();
+
+        let right_height = 1 + usize::max(
+            Self::height(&self.right),
+            Self::height(&left.right));
+        let total_height = usize::max(left.height, 1 + right_height);
+
+        MergleNode {
+            hash: self.hash,
+            height: total_height,
+            elem: left.elem.clone(),
+            elem_hash: left.elem_hash,
+            left: left.left.clone(),
+            right: Some(Rc::new(MergleNode {
+                hash: Self::hash(&left.right) * self.elem_hash * Self::hash(&self.right),
+                height: right_height,
+                elem: self.elem.clone(),
+                elem_hash: self.elem_hash,
+                left: self.right.clone(),
+                right: left.right.clone(),
+            })),
+        }
+    }
+
+    fn join(left: &MergleNode<T>, right: &MergleNode<T>) -> MergleNode<T> {
+        panic!()
+    }
+}
+
+impl<T: BrombergHashable> BrombergHashable for MergleNode<T> {
+    fn bromberg_hash(&self) -> HashMatrix {
+        self.hash
+    }
+}
+
+pub struct Mergle<T> {
+    root: Rc<MergleNode<T>>,
 }
 
 impl<T: BrombergHashable + Clone> Mergle<T> {
     pub fn singleton(t: T, table: &MemTableRef) -> Mergle<T> {
-        let h = t.bromberg_hash();
-        Mergle {
-            tree: FingerTree::new().push_right(Leaf(t, h)),
-            table: table.clone(),
-        }
+        panic!()
     }
 
     #[must_use]
     pub fn merge(&self, other: &Self) -> Self {
-        Mergle {
-            tree: self.tree.concat(&other.tree),
-            table: self.table.clone(),
-        }
+        panic!()
     }
 
+    /*
     pub fn iter(&self) -> impl Iterator<Item=T> + '_ {
-        self.tree.iter().map(|l| l.0)
+        panic!()
     }
+    */
 
     #[must_use]
     pub fn pop(&self) -> (T, Option<Mergle<T>>) {
-        match self.tree.view_right() {
-            Some((v, r)) => {
-                if r.is_empty() {
-                    (v.0, None)
-                } else {
-                    (v.0, Some(Mergle{ tree: r, table: self.table.clone() }))
-                }
-            },
-            None => panic!("Attempt to pop from empty tree"),
-        }
+        panic!()
     }
 }
 
 impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
     #[must_use]
     pub fn prefix_cmp(&self, other: &Self) -> PrefixDiff<Mergle<T>> {
-        match prefix_cmp(&self.tree, &other.tree, &self.table) {
-            PrefixDiff::LessThan => PrefixDiff::LessThan,
-            PrefixDiff::PrefixOf(t) => PrefixDiff::PrefixOf(Mergle{tree: t, table: self.table.clone() }),
-            PrefixDiff::Equal => PrefixDiff::Equal,
-            PrefixDiff::PrefixedBy(t) => PrefixDiff::PrefixedBy(Mergle{tree: t, table: self.table.clone() }),
-            PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
-        }
+        panic!()
     }
 }
 
