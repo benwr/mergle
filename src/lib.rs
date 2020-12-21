@@ -9,6 +9,9 @@ extern crate alloc;
 #[cfg(test)]
 mod test;
 
+use alloc::collections::btree_map::BTreeMap;
+use alloc::rc::Rc;
+use core::cell::RefCell;
 use core::cmp::Ordering;
 
 use num_bigint::BigUint;
@@ -18,6 +21,43 @@ use fingertrees::rc::FingerTree;
 use fingertrees::measure::Measured;
 use fingertrees::monoid::Monoid;
 
+pub struct MemTableRef(Rc<RefCell<BTreeMap<(HashMatrix, HashMatrix), Ordering>>>);
+
+impl Clone for MemTableRef {
+    fn clone(&self) -> Self {
+        MemTableRef(Rc::clone(&self.0))
+    }
+}
+
+impl MemTableRef {
+    pub fn new() -> Self {
+        MemTableRef(Rc::new(RefCell::new(BTreeMap::new())))
+    }
+
+    fn insert(&self, a: HashMatrix, b: HashMatrix, r: Ordering) {
+        let mut table = self.0.borrow_mut();
+        if a > b {
+            table.insert((b, a), r.reverse());
+        } else {
+            table.insert((a, b), r.clone());
+        }
+    }
+
+    fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<Ordering> {
+        if a == b {
+            Some(Ordering::Equal)
+        } else {
+            let table = self.0.borrow();
+            if a > b {
+                table.get(&(b, a)).map(|r| r.reverse())
+            } else {
+                table.get(&(a, b)).map(|r| r.clone())
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
 pub enum PrefixDiff<T> {
     LessThan,
     PrefixOf(T),
@@ -83,18 +123,22 @@ impl<T> Eq for Leaf<T> {}
 #[derive(Clone)]
 pub struct Mergle<T: BrombergHashable + Clone> {
     tree: FingerTree<Leaf<T>>,
+    table: MemTableRef,
 }
 
 fn prefix_cmp_equals<T: BrombergHashable + Clone + Ord>(
     left: &FingerTree<Leaf<T>>,
-    right: &FingerTree<Leaf<T>>
+    right: &FingerTree<Leaf<T>>,
+    table: &MemTableRef,
 ) -> Ordering {
     let left_anno = left.measure();
-    if left_anno.hash == right.measure().hash || left.is_empty() {
-        return Ordering::Equal
+    let left_hash = left_anno.hash;
+    let right_hash = right.measure().hash;
+    if let Some(result) = table.lookup(left_hash, right_hash) {
+        return result
     }
     let size = left_anno.size;
-    if size == BigUint::from(1_u8) {
+    let result = if size == BigUint::from(1_u8) {
         let left_thing = left.view_left().unwrap().0;
         let right_thing = right.view_left().unwrap().0;
         left_thing.0.cmp(&right_thing.0)
@@ -102,12 +146,15 @@ fn prefix_cmp_equals<T: BrombergHashable + Clone + Ord>(
         let new_size = size / 2_u8;
         let (left_left, left_right) = size_split(&left, &new_size);
         let (right_left, right_right) = size_split(&right, &new_size);
-        match prefix_cmp_equals(&left_left, &right_left) {
+        match prefix_cmp_equals(&left_left, &right_left, table) {
             Ordering::Less => Ordering::Less,
             Ordering::Greater => Ordering::Greater,
-            Ordering::Equal => prefix_cmp_equals(&left_right, &right_right)
+            Ordering::Equal => prefix_cmp_equals(&left_right, &right_right, table)
         }
-    }
+    };
+
+    table.insert(left_hash, right_hash, result);
+    result
 }
 
 fn size_split<T: BrombergHashable + Clone>(
@@ -119,19 +166,20 @@ fn size_split<T: BrombergHashable + Clone>(
 
 fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
     left: &FingerTree<Leaf<T>>,
-    right: &FingerTree<Leaf<T>>
+    right: &FingerTree<Leaf<T>>,
+    table: &MemTableRef,
 ) -> PrefixDiff<FingerTree<Leaf<T>>> {
     let left_size = left.measure().size;
     let right_size = right.measure().size;
     match left_size.cmp(&right_size) {
-        Ordering::Equal => match prefix_cmp_equals(left, right) {
+        Ordering::Equal => match prefix_cmp_equals(left, right, table) {
             Ordering::Less => PrefixDiff::LessThan,
             Ordering::Equal => PrefixDiff::Equal,
             Ordering::Greater => PrefixDiff::GreaterThan,
         },
         Ordering::Less => {
             let (right_eq, right_suffix) = size_split(right, &left_size);
-            match prefix_cmp_equals(left, &right_eq) {
+            match prefix_cmp_equals(left, &right_eq, table) {
                 Ordering::Less => PrefixDiff::LessThan,
                 Ordering::Equal => PrefixDiff::PrefixOf(right_suffix),
                 Ordering::Greater => PrefixDiff::GreaterThan,
@@ -139,7 +187,7 @@ fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
         }
         Ordering::Greater => {
             let (left_eq, left_suffix) = size_split(left, &right_size);
-            match prefix_cmp_equals(&left_eq, right) {
+            match prefix_cmp_equals(&left_eq, right, table) {
                 Ordering::Less => PrefixDiff::LessThan,
                 Ordering::Equal => PrefixDiff::PrefixedBy(left_suffix),
                 Ordering::Greater => PrefixDiff::GreaterThan,
@@ -149,17 +197,19 @@ fn prefix_cmp<T: BrombergHashable + Clone + Ord>(
 }
 
 impl<T: BrombergHashable + Clone> Mergle<T> {
-    pub fn singleton(t: T) -> Mergle<T> {
+    pub fn singleton(t: T, table: &MemTableRef) -> Mergle<T> {
         let h = t.bromberg_hash();
         Mergle {
-            tree: FingerTree::new().push_right(Leaf(t, h))
+            tree: FingerTree::new().push_right(Leaf(t, h)),
+            table: table.clone(),
         }
     }
 
     #[must_use]
     pub fn merge(&self, other: &Self) -> Self {
         Mergle {
-            tree: self.tree.concat(&other.tree)
+            tree: self.tree.concat(&other.tree),
+            table: self.table.clone(),
         }
     }
 
@@ -174,7 +224,7 @@ impl<T: BrombergHashable + Clone> Mergle<T> {
                 if r.is_empty() {
                     (v.0, None)
                 } else {
-                    (v.0, Some(Mergle{ tree: r }))
+                    (v.0, Some(Mergle{ tree: r, table: self.table.clone() }))
                 }
             },
             None => panic!("Attempt to pop from empty tree"),
@@ -185,11 +235,11 @@ impl<T: BrombergHashable + Clone> Mergle<T> {
 impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
     #[must_use]
     pub fn prefix_cmp(&self, other: &Self) -> PrefixDiff<Mergle<T>> {
-        match prefix_cmp(&self.tree, &other.tree) {
+        match prefix_cmp(&self.tree, &other.tree, &self.table) {
             PrefixDiff::LessThan => PrefixDiff::LessThan,
-            PrefixDiff::PrefixOf(t) => PrefixDiff::PrefixOf(Mergle{tree: t}),
+            PrefixDiff::PrefixOf(t) => PrefixDiff::PrefixOf(Mergle{tree: t, table: self.table.clone() }),
             PrefixDiff::Equal => PrefixDiff::Equal,
-            PrefixDiff::PrefixedBy(t) => PrefixDiff::PrefixedBy(Mergle{tree: t}),
+            PrefixDiff::PrefixedBy(t) => PrefixDiff::PrefixedBy(Mergle{tree: t, table: self.table.clone() }),
             PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
         }
     }

@@ -37,9 +37,10 @@ impl<T: Arbitrary> Arbitrary for MergleOp<T> {
 
 fn make_mergle(vec: &[MergleOp<U8>]) -> Option<Mergle<U8>> {
     let mut mergles = Vec::new();
+    let table = MemTableRef::new();
     for op in vec {
         let new_mergle = match op {
-            MergleOp::Singleton(elem) => Some(Mergle::singleton(elem.clone())),
+            MergleOp::Singleton(elem) => Some(Mergle::singleton(elem.clone(), &table)),
             MergleOp::Merge(a, b) => {
                 if !mergles.is_empty() {
                     let mergle_a: &Mergle<U8> = mergles.get(a % mergles.len()).unwrap();
