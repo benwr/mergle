@@ -15,7 +15,6 @@ use core::cell::RefCell;
 use core::cmp::Ordering;
 
 use num_bigint::BigUint;
-use num_traits::pow::*;
 
 use bromberg_sl2::{BrombergHashable, HashMatrix, I};
 use fingertrees::rc::FingerTree;
