@@ -90,6 +90,10 @@ impl<T: BrombergHashable + Clone> MergleNode<T> {
         }
     }
 
+    fn balance(&self) -> isize {
+        (Self::height(&self.left) as isize) - (Self::height(&self.right) as isize)
+    }
+
     fn hash(t: &Option<Rc<MergleNode<T>>>) -> HashMatrix {
         match t {
             None => I,
