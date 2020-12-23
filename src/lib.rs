@@ -16,20 +16,20 @@ use core::cmp::Ordering;
 
 use bromberg_sl2::{BrombergHashable, HashMatrix, I};
 
-pub struct MemTableRef(Rc<RefCell<BTreeMap<(HashMatrix, HashMatrix), Ordering>>>);
+pub struct MemTableRef<T>(Rc<RefCell<BTreeMap<(HashMatrix, HashMatrix), PrefixDiff<T>>>>);
 
-impl Clone for MemTableRef {
+impl<T> Clone for MemTableRef<T> {
     fn clone(&self) -> Self {
         MemTableRef(Rc::clone(&self.0))
     }
 }
 
-impl MemTableRef {
+impl<T: Clone> MemTableRef<T> {
     pub fn new() -> Self {
         MemTableRef(Rc::new(RefCell::new(BTreeMap::new())))
     }
 
-    fn insert(&self, a: HashMatrix, b: HashMatrix, r: Ordering) {
+    fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixDiff<T>) {
         let mut table = self.0.borrow_mut();
         if a > b {
             table.insert((b, a), r.reverse());
@@ -38,9 +38,9 @@ impl MemTableRef {
         }
     }
 
-    fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<Ordering> {
+    fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<PrefixDiff<T>> {
         if a == b {
-            Some(Ordering::Equal)
+            Some(PrefixDiff::Equal)
         } else {
             let table = self.0.borrow();
             if a > b {
@@ -61,8 +61,28 @@ pub enum PrefixDiff<T> {
     GreaterThan,
 }
 
+impl<T: Clone> PrefixDiff<T> {
+    fn reverse(&self) -> Self {
+        match self {
+            PrefixDiff::LessThan => PrefixDiff::GreaterThan,
+            PrefixDiff::PrefixOf(t) => PrefixDiff::PrefixedBy(t.clone()),
+            PrefixDiff::Equal => PrefixDiff::Equal,
+            PrefixDiff::PrefixedBy(t) => PrefixDiff::PrefixOf(t.clone()),
+            PrefixDiff::GreaterThan => PrefixDiff::LessThan,
+        }
+    }
+
+    fn from_ord(o: Ordering) -> Self {
+        match o {
+            Ordering::Less => PrefixDiff::LessThan,
+            Ordering::Equal => PrefixDiff::Equal,
+            Ordering::Greater => PrefixDiff::GreaterThan
+        }
+    }
+}
+
 #[derive(Clone)]
-struct MergleNode<T> {
+pub struct MergleNode<T> {
     elem: T,
     elem_hash: HashMatrix,
     height: usize,
@@ -71,7 +91,7 @@ struct MergleNode<T> {
     right: Option<Rc<MergleNode<T>>>,
 }
 
-impl<T: BrombergHashable + Clone> MergleNode<T> {
+impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
     fn new(
         elem: T,
         elem_hash: HashMatrix,
@@ -215,6 +235,25 @@ impl<T: BrombergHashable + Clone> MergleNode<T> {
             (v, Some(new_left)) => Self::join_with_insert(&new_left, v, right)
         }
     }
+
+    fn prefix_diff(
+        self: &Self,
+        other: &Self,
+        table: &MemTableRef<Rc<Self>>,
+    ) -> PrefixDiff<Rc<Self>> {
+        if let Some(res) = table.lookup(self.hash, other.hash) {
+            return res;
+        }
+        let res = match (self.height, other.height) {
+            (1, 1) => PrefixDiff::from_ord(self.elem.cmp(&other.elem)),
+            (a, b) if a > b + 1 => panic!(),
+            (a, b) if a + 1 > b => panic!(),
+            (a, b) => panic!(),
+        };
+
+        table.insert(self.hash, other.hash, res.clone());
+        res
+    }
 }
 
 
@@ -226,11 +265,11 @@ impl<T: BrombergHashable> BrombergHashable for MergleNode<T> {
 
 pub struct Mergle<T> {
     root: Rc<MergleNode<T>>,
-    table: MemTableRef,
+    table: MemTableRef<Rc<MergleNode<T>>>,
 }
 
-impl<T: BrombergHashable + Clone> Mergle<T> {
-    pub fn singleton(t: T, table: &MemTableRef) -> Mergle<T> {
+impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
+    pub fn singleton(t: T, table: &MemTableRef<Rc<MergleNode<T>>>) -> Mergle<T> {
         Mergle {
             root: Rc::new(MergleNode::singleton(t)),
             table: table.clone()
@@ -261,7 +300,9 @@ impl<T: BrombergHashable + Clone> Mergle<T> {
 impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
     #[must_use]
     pub fn prefix_cmp(&self, other: &Self) -> PrefixDiff<Mergle<T>> {
-        panic!()
+        match self.root.prefix_diff(&*other.root, &self.table) {
+            _ => panic!()
+        }
     }
 }
 
