@@ -72,38 +72,33 @@ struct MergleNode<T> {
 }
 
 impl<T: BrombergHashable + Clone> MergleNode<T> {
+    fn new(
+        elem: T,
+        elem_hash: HashMatrix,
+        left: Option<Rc<Self>>,
+        right: Option<Rc<Self>>
+    ) -> Self {
+        MergleNode {
+            elem: elem,
+            elem_hash: elem_hash,
+            height: usize::max(Self::height(&left), Self::height(&right)) + 1,
+            hash: Self::hash(&left) * elem_hash * Self::hash(&right),
+            left: left,
+            right: right,
+        }
+    }
+
     fn singleton(e: T) -> Self {
         let h = e.bromberg_hash();
-        MergleNode {
-            elem: e,
-            elem_hash: h,
-            height: 1,
-            hash: h,
-            left: None,
-            right: None,
-        }
+        Self::new(e, h, None, None)
     }
 
     fn replace_left(&self, subtree: Option<Rc<Self>>) -> Self {
-        MergleNode {
-            elem: self.elem.clone(),
-            elem_hash: self.elem_hash,
-            height: usize::max(Self::height(&subtree), Self::height(&self.right)) + 1,
-            hash: Self::hash(&subtree) * self.elem_hash * Self::hash(&self.right),
-            left: subtree,
-            right: self.right.clone(),
-        }
+        Self::new(self.elem.clone(), self.elem_hash, subtree, self.right.clone())
     }
 
     fn replace_right(&self, subtree: Option<Rc<Self>>) -> Self {
-        MergleNode {
-            elem: self.elem.clone(),
-            elem_hash: self.elem_hash,
-            height: usize::max(Self::height(&self.left), Self::height(&subtree)) + 1,
-            hash: Self::hash(&self.left) * self.elem_hash * Self::hash(&subtree),
-            left: self.left.clone(),
-            right: subtree,
-        }
+        Self::new(self.elem.clone(), self.elem_hash, self.left.clone(), subtree)
     }
 
     fn height(t: &Option<Rc<Self>>) -> usize {
@@ -135,33 +130,29 @@ impl<T: BrombergHashable + Clone> MergleNode<T> {
         left.replace_right(Some(Rc::new(self.replace_left(left.right.clone()))))
     }
 
-    fn rebalance(&self) -> Self {
+    fn rebalance(self) -> Self {
         let b = self.balance();
-        // five cases:
-        if isize::abs(b) < 2 {
-            // 1. We're balanced; nothing to do.
-            self.clone()
-        } else if b >= 2 {
+        let res = if b > 1 {
             // left is too heavy.
             let left = self.left.as_ref().unwrap();
             if left.balance() < 0 {
-                // 2. left is too heavy and right-leaning
                 self.replace_left(Some(Rc::new(left.rotate_left()))).rotate_right()
             } else {
-                // 3. left is too heavy and left-leaning or balanced
                 self.rotate_right()
             }
-        } else {
+        } else if b < -1 {
             let right = self.right.as_ref().unwrap();
             // right is too heavy.
             if right.balance() > 0 {
-                // 2. right is too heavy and left-leaning
                 self.replace_right(Some(Rc::new(right.rotate_right()))).rotate_left()
             } else {
-                // 3. right is too heavy and right-leaning or balanced
                 self.rotate_left()
             }
-        }
+        } else {
+            self.clone()
+        };
+        debug_assert!(isize::abs(Self::balance(&res)) < 2);
+        res
     }
 
     fn pop_right(&self) -> (T, Option<Rc<Self>>) {
@@ -183,12 +174,25 @@ impl<T: BrombergHashable + Clone> MergleNode<T> {
         self.replace_left(Some(Rc::new(left))).rebalance()
     }
 
-    fn join_left_with_insert(left: &Rc<Self>, insertion: T, right: &Rc<Self>) -> Self {
-        panic!()
+    fn join_left_with_insert(left: &Rc<Self>, t: T, right: &Rc<Self>) -> Self {
+        let t_prime = if Self::height(&right.left) > left.height + 1 {
+            Self::join_left_with_insert(left, t, right.left.as_ref().unwrap())
+        } else {
+            let h = t.bromberg_hash();
+            Self::new(t, h, Some(left.clone()), right.left.clone())
+        };
+        right.replace_left(Some(Rc::new(t_prime))).rebalance()
     }
 
-    fn join_right_with_insert(left: &Rc<Self>, insertion: T, right: &Rc<Self>) -> Self {
-        panic!()
+    fn join_right_with_insert(left: &Rc<Self>, t: T, right: &Rc<Self>) -> Self {
+        let t_prime = if Self::height(&left.right) > right.height + 1 {
+            Self::join_right_with_insert(left.right.as_ref().unwrap(), t, right)
+        } else {
+            let h = t.bromberg_hash();
+            Self::new(t, h, left.right.clone(), Some(right.clone()))
+        };
+
+        left.replace_right(Some(Rc::new(t_prime))).rebalance()
     }
 
     fn join_with_insert(left: &Rc<Self>, insertion: T, right: &Rc<Self>) -> Self {
@@ -201,14 +205,7 @@ impl<T: BrombergHashable + Clone> MergleNode<T> {
             Self::join_left_with_insert(left, insertion, right)
         } else {
             let elem_hash = insertion.bromberg_hash();
-            MergleNode {
-                elem_hash: elem_hash,
-                elem: insertion,
-                height: usize::max(left.height, right.height) + 1,
-                hash: left.hash * elem_hash * right.hash,
-                left: Some(left.clone()),
-                right: Some(right.clone()),
-            }
+            Self::new(insertion, elem_hash, Some(left.clone()), Some(right.clone()))
         }
     }
 
