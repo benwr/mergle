@@ -1,4 +1,4 @@
-#![no_std]
+//#![no_std]
 
 #[cfg(test)]
 #[macro_use]
@@ -13,6 +13,7 @@ use alloc::collections::btree_map::BTreeMap;
 use alloc::rc::Rc;
 use core::cell::RefCell;
 use core::cmp::Ordering;
+use std::vec::Vec;
 
 use bromberg_sl2::{BrombergHashable, HashMatrix, I};
 
@@ -76,7 +77,7 @@ impl<T: Clone> PrefixDiff<T> {
         match o {
             Ordering::Less => PrefixDiff::LessThan,
             Ordering::Equal => PrefixDiff::Equal,
-            Ordering::Greater => PrefixDiff::GreaterThan
+            Ordering::Greater => PrefixDiff::GreaterThan,
         }
     }
 }
@@ -96,7 +97,7 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
         elem: T,
         elem_hash: HashMatrix,
         left: Option<Rc<Self>>,
-        right: Option<Rc<Self>>
+        right: Option<Rc<Self>>,
     ) -> Self {
         MergleNode {
             elem: elem,
@@ -114,11 +115,21 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
     }
 
     fn replace_left(&self, subtree: Option<Rc<Self>>) -> Self {
-        Self::new(self.elem.clone(), self.elem_hash, subtree, self.right.clone())
+        Self::new(
+            self.elem.clone(),
+            self.elem_hash,
+            subtree,
+            self.right.clone(),
+        )
     }
 
     fn replace_right(&self, subtree: Option<Rc<Self>>) -> Self {
-        Self::new(self.elem.clone(), self.elem_hash, self.left.clone(), subtree)
+        Self::new(
+            self.elem.clone(),
+            self.elem_hash,
+            self.left.clone(),
+            subtree,
+        )
     }
 
     fn height(t: &Option<Rc<Self>>) -> usize {
@@ -144,7 +155,6 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
         right.replace_left(Some(Rc::new(self.replace_right(right.left.clone()))))
     }
 
-
     fn rotate_right(&self) -> Self {
         let left = self.left.as_ref().unwrap();
         left.replace_right(Some(Rc::new(self.replace_left(left.right.clone()))))
@@ -156,7 +166,8 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
             // left is too heavy.
             let left = self.left.as_ref().unwrap();
             if left.balance() < 0 {
-                self.replace_left(Some(Rc::new(left.rotate_left()))).rotate_right()
+                self.replace_left(Some(Rc::new(left.rotate_left())))
+                    .rotate_right()
             } else {
                 self.rotate_right()
             }
@@ -164,7 +175,8 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
             let right = self.right.as_ref().unwrap();
             // right is too heavy.
             if right.balance() > 0 {
-                self.replace_right(Some(Rc::new(right.rotate_right()))).rotate_left()
+                self.replace_right(Some(Rc::new(right.rotate_right())))
+                    .rotate_left()
             } else {
                 self.rotate_left()
             }
@@ -225,14 +237,26 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
             Self::join_left_with_insert(left, insertion, right)
         } else {
             let elem_hash = insertion.bromberg_hash();
-            Self::new(insertion, elem_hash, Some(left.clone()), Some(right.clone()))
+            Self::new(
+                insertion,
+                elem_hash,
+                Some(left.clone()),
+                Some(right.clone()),
+            )
         }
     }
 
     fn join(left: &Rc<Self>, right: &Rc<Self>) -> Self {
         match left.pop_right() {
             (v, None) => right.push_left(v),
-            (v, Some(new_left)) => Self::join_with_insert(&new_left, v, right)
+            (v, Some(new_left)) => Self::join_with_insert(&new_left, v, right),
+        }
+    }
+
+    fn elem_plus_right(&self) -> Self {
+        match &self.right {
+            None => MergleNode::singleton(self.elem.clone()),
+            Some(r) => r.push_left(self.elem.clone()),
         }
     }
 
@@ -244,18 +268,33 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
         if let Some(res) = table.lookup(self.hash, other.hash) {
             return res;
         }
+        if self.hash == other.hash {
+            return PrefixDiff::Equal;
+        }
+
         let res = match (self.height, other.height) {
             (1, 1) => PrefixDiff::from_ord(self.elem.cmp(&other.elem)),
-            (a, b) if a > b + 1 => panic!(),
-            (a, b) if a + 1 > b => panic!(),
-            (a, b) => panic!(),
+            (a, b) if a >= b => {
+                let left_subtree = self.left.as_ref().unwrap();
+                match left_subtree.prefix_diff(other, table) {
+                    PrefixDiff::LessThan => PrefixDiff::LessThan,
+                    PrefixDiff::PrefixOf(b_suffix) => {
+                        MergleNode::prefix_diff(&self.elem_plus_right(), &b_suffix, table)
+                    }
+                    PrefixDiff::Equal => PrefixDiff::PrefixedBy(Rc::new(self.elem_plus_right())),
+                    PrefixDiff::PrefixedBy(a_suffix) => PrefixDiff::PrefixedBy(Rc::new(
+                        MergleNode::join(&a_suffix, &Rc::new(self.elem_plus_right())),
+                    )),
+                    PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
+                }
+            }
+            (_, _) => MergleNode::prefix_diff(other, self, table).reverse(),
         };
 
         table.insert(self.hash, other.hash, res.clone());
         res
     }
 }
-
 
 impl<T: BrombergHashable> BrombergHashable for MergleNode<T> {
     fn bromberg_hash(&self) -> HashMatrix {
@@ -272,7 +311,7 @@ impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
     pub fn singleton(t: T, table: &MemTableRef<Rc<MergleNode<T>>>) -> Mergle<T> {
         Mergle {
             root: Rc::new(MergleNode::singleton(t)),
-            table: table.clone()
+            table: table.clone(),
         }
     }
 
@@ -280,20 +319,26 @@ impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
     pub fn merge(&self, other: &Self) -> Self {
         Mergle {
             root: Rc::new(MergleNode::join(&self.root, &other.root)),
-            table: self.table.clone()
+            table: self.table.clone(),
         }
     }
 
-    /*
-    pub fn iter(&self) -> impl Iterator<Item=T> + '_ {
-        panic!()
+    pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
+        Iter {
+            stack: vec![self.root.clone()],
+        }
     }
-    */
 
     #[must_use]
     pub fn pop(&self) -> (T, Option<Mergle<T>>) {
         let (v, n) = self.root.pop_right();
-        (v, n.map(|r| Mergle{root: r, table: self.table.clone()}))
+        (
+            v,
+            n.map(|r| Mergle {
+                root: r,
+                table: self.table.clone(),
+            }),
+        )
     }
 }
 
@@ -301,7 +346,17 @@ impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
     #[must_use]
     pub fn prefix_cmp(&self, other: &Self) -> PrefixDiff<Mergle<T>> {
         match self.root.prefix_diff(&*other.root, &self.table) {
-            _ => panic!()
+            PrefixDiff::LessThan => PrefixDiff::LessThan,
+            PrefixDiff::PrefixOf(node) => PrefixDiff::PrefixOf(Mergle {
+                root: node.clone(),
+                table: self.table.clone(),
+            }),
+            PrefixDiff::Equal => PrefixDiff::Equal,
+            PrefixDiff::PrefixedBy(node) => PrefixDiff::PrefixedBy(Mergle {
+                root: node.clone(),
+                table: self.table.clone(),
+            }),
+            PrefixDiff::GreaterThan => PrefixDiff::GreaterThan,
         }
     }
 }
@@ -329,3 +384,29 @@ impl<T: BrombergHashable + Clone + Ord> PartialEq for Mergle<T> {
 }
 
 impl<T: BrombergHashable + Clone + Ord> Eq for Mergle<T> {}
+
+pub struct Iter<T> {
+    stack: Vec<Rc<MergleNode<T>>>,
+}
+
+impl<T: BrombergHashable + Clone + Ord> Iterator for Iter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut result = None;
+        while let Some(node) = self.stack.pop() {
+            if let Some(right_tree) = &node.right {
+                self.stack.push(right_tree.clone());
+            };
+
+            if let Some(left_tree) = &node.left {
+                self.stack
+                    .push(Rc::new(MergleNode::singleton(node.elem.clone())));
+                self.stack.push(left_tree.clone());
+            } else {
+                result = Some(node.elem.clone());
+                break;
+            }
+        }
+        result
+    }
+}
