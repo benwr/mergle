@@ -324,7 +324,7 @@ impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
 
     pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
         let mut stack = Vec::new();
-        stack.push(self.root.clone());
+        stack.push(StackElem::Node(self.root.clone()));
         Iter { stack: stack }
     }
 
@@ -391,25 +391,42 @@ impl<T: BrombergHashable> BrombergHashable for Mergle<T> {
 }
 
 pub struct Iter<T> {
-    stack: Vec<Rc<MergleNode<T>>>,
+    stack: Vec<StackElem<T>>,
+}
+
+enum StackElem<T> {
+    // Union type for subtrees and individual elements
+    Elem(T),
+    Node(Rc<MergleNode<T>>),
 }
 
 impl<T: BrombergHashable + Clone + Ord> Iterator for Iter<T> {
     type Item = T;
     fn next(&mut self) -> Option<Self::Item> {
         let mut result = None;
-        while let Some(node) = self.stack.pop() {
-            if let Some(right_tree) = &node.right {
-                self.stack.push(right_tree.clone());
-            };
+        while let Some(stack_elem) = self.stack.pop() {
+            match stack_elem {
+                StackElem::Elem(elem) => {
+                    // yield single element
+                    result = Some(elem.clone());
+                    break;
+                }
+                StackElem::Node(node) => {
+                    // unexplored elements are pushed to the stack in the order:
+                    // right, center, left
+                    if let Some(right_tree) = &node.right {
+                        self.stack.push(StackElem::Node(right_tree.clone()));
+                    };
 
-            if let Some(left_tree) = &node.left {
-                self.stack
-                    .push(Rc::new(MergleNode::singleton(node.elem.clone())));
-                self.stack.push(left_tree.clone());
-            } else {
-                result = Some(node.elem.clone());
-                break;
+                    if let Some(left_tree) = &node.left {
+                        self.stack.push(StackElem::Elem(node.elem.clone()));
+                        self.stack.push(StackElem::Node(left_tree.clone()));
+                    } else {
+                        // If there are no more left subtrees, yield the central element
+                        result = Some(node.elem.clone());
+                        break;
+                    }
+                }
             }
         }
         result
