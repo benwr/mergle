@@ -325,9 +325,7 @@ impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
     pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
         let mut stack = Vec::new();
         stack.push(self.root.clone());
-        Iter {
-            stack: stack,
-        }
+        Iter { stack: stack }
     }
 
     #[must_use]
@@ -385,6 +383,12 @@ impl<T: BrombergHashable + Clone + Ord> PartialEq for Mergle<T> {
 }
 
 impl<T: BrombergHashable + Clone + Ord> Eq for Mergle<T> {}
+
+impl<T: BrombergHashable> BrombergHashable for Mergle<T> {
+    fn bromberg_hash(&self) -> HashMatrix {
+        self.root.bromberg_hash()
+    }
+}
 
 pub struct Iter<T> {
     stack: Vec<Rc<MergleNode<T>>>,
