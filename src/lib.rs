@@ -1,4 +1,4 @@
-//#![no_std]
+#![no_std]
 
 #[cfg(test)]
 #[macro_use]
@@ -11,9 +11,9 @@ mod test;
 
 use alloc::collections::btree_map::BTreeMap;
 use alloc::rc::Rc;
+use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::cmp::Ordering;
-use std::vec::Vec;
 
 use bromberg_sl2::{BrombergHashable, HashMatrix, I};
 
@@ -323,8 +323,10 @@ impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
+        let mut stack = Vec::new();
+        stack.push(self.root.clone());
         Iter {
-            stack: vec![self.root.clone()],
+            stack: stack,
         }
     }
 
