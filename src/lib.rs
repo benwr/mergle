@@ -17,7 +17,9 @@ use std::vec::Vec;
 
 use bromberg_sl2::{BrombergHashable, HashMatrix, I};
 
-pub struct MemTableRef<T>(Rc<RefCell<BTreeMap<(HashMatrix, HashMatrix), PrefixDiff<T>>>>);
+pub struct MemTableRef<T>(
+    Rc<RefCell<BTreeMap<(HashMatrix, HashMatrix), PrefixDiff<Rc<MergleNode<T>>>>>>,
+);
 
 impl<T> Clone for MemTableRef<T> {
     fn clone(&self) -> Self {
@@ -30,7 +32,7 @@ impl<T: Clone> MemTableRef<T> {
         MemTableRef(Rc::new(RefCell::new(BTreeMap::new())))
     }
 
-    fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixDiff<T>) {
+    fn insert(&self, a: HashMatrix, b: HashMatrix, r: PrefixDiff<Rc<MergleNode<T>>>) {
         let mut table = self.0.borrow_mut();
         if a > b {
             table.insert((b, a), r.reverse());
@@ -39,7 +41,7 @@ impl<T: Clone> MemTableRef<T> {
         }
     }
 
-    fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<PrefixDiff<T>> {
+    fn lookup(&self, a: HashMatrix, b: HashMatrix) -> Option<PrefixDiff<Rc<MergleNode<T>>>> {
         if a == b {
             Some(PrefixDiff::Equal)
         } else {
@@ -260,11 +262,7 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
         }
     }
 
-    fn prefix_diff(
-        self: &Self,
-        other: &Self,
-        table: &MemTableRef<Rc<Self>>,
-    ) -> PrefixDiff<Rc<Self>> {
+    fn prefix_diff(self: &Self, other: &Self, table: &MemTableRef<T>) -> PrefixDiff<Rc<Self>> {
         if let Some(res) = table.lookup(self.hash, other.hash) {
             return res;
         }
@@ -302,13 +300,14 @@ impl<T: BrombergHashable> BrombergHashable for MergleNode<T> {
     }
 }
 
+#[derive(Clone)]
 pub struct Mergle<T> {
     root: Rc<MergleNode<T>>,
-    table: MemTableRef<Rc<MergleNode<T>>>,
+    table: MemTableRef<T>,
 }
 
 impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
-    pub fn singleton(t: T, table: &MemTableRef<Rc<MergleNode<T>>>) -> Mergle<T> {
+    pub fn singleton(t: T, table: &MemTableRef<T>) -> Mergle<T> {
         Mergle {
             root: Rc::new(MergleNode::singleton(t)),
             table: table.clone(),
