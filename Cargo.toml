@@ -15,6 +15,7 @@ opt-level = 3
 codegen-units = 1
 
 [dependencies]
+num-bigint = "^0.3.1"
 bromberg_sl2 = "^0.5.0"
 
 [dev-dependencies]

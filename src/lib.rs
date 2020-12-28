@@ -1,4 +1,4 @@
-#![no_std]
+//#![no_std]
 
 #[cfg(test)]
 #[macro_use]
@@ -16,6 +16,7 @@ use core::cell::RefCell;
 use core::cmp::Ordering;
 
 use bromberg_sl2::{BrombergHashable, HashMatrix, I};
+use num_bigint::BigUint;
 
 pub struct MemTableRef<T>(
     Rc<RefCell<BTreeMap<(HashMatrix, HashMatrix), PrefixDiff<Rc<MergleNode<T>>>>>>,
@@ -84,11 +85,20 @@ impl<T: Clone> PrefixDiff<T> {
     }
 }
 
+fn is_balanced(left: &BigUint, right: &BigUint) -> bool {
+    let one = BigUint::from(1u8);
+    let four = BigUint::from(4u8);
+    let lw = left + &one;
+    let rw = right + &one;
+    let nw = left + right + &one + &one;
+    &four * &lw >= nw && &four * &rw >= nw
+}
+
 #[derive(Clone)]
 pub struct MergleNode<T> {
     elem: T,
     elem_hash: HashMatrix,
-    height: usize,
+    size: BigUint,
     hash: HashMatrix,
     left: Option<Rc<MergleNode<T>>>,
     right: Option<Rc<MergleNode<T>>>,
@@ -104,7 +114,7 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
         MergleNode {
             elem: elem,
             elem_hash: elem_hash,
-            height: usize::max(Self::height(&left), Self::height(&right)) + 1,
+            size: Self::size(&left) + Self::size(&right) + BigUint::from(1u8),
             hash: Self::hash(&left) * elem_hash * Self::hash(&right),
             left: left,
             right: right,
@@ -133,15 +143,15 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
         )
     }
 
-    fn height(t: &Option<Rc<Self>>) -> usize {
+    fn size(t: &Option<Rc<Self>>) -> BigUint {
         match t {
-            None => 0,
-            Some(p) => p.height,
+            None => BigUint::from(0u8),
+            Some(p) => p.size.clone(),
         }
     }
 
-    fn balance(&self) -> isize {
-        (Self::height(&self.left) as isize) - (Self::height(&self.right) as isize)
+    fn is_balanced(&self) -> bool {
+        is_balanced(&Self::size(&self.left), &Self::size(&self.right))
     }
 
     fn hash(t: &Option<Rc<Self>>) -> HashMatrix {
@@ -162,29 +172,38 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
     }
 
     fn rebalance(self) -> Self {
-        let b = self.balance();
-        let res = if b > 1 {
+        let res = if self.is_balanced() {
+            self.clone()
+        } else if Self::size(&self.left) > Self::size(&self.right) {
             // left is too heavy.
             let left = self.left.as_ref().unwrap();
-            if left.balance() < 0 {
+            if is_balanced(&Self::size(&left.right), &Self::size(&self.right))
+                && is_balanced(
+                    &Self::size(&left.left),
+                    &(Self::size(&left.right) + Self::size(&self.right) + BigUint::from(1u8)),
+                )
+            {
+                self.rotate_right()
+            } else {
                 self.replace_left(Some(Rc::new(left.rotate_left())))
                     .rotate_right()
-            } else {
-                self.rotate_right()
-            }
-        } else if b < -1 {
-            let right = self.right.as_ref().unwrap();
-            // right is too heavy.
-            if right.balance() > 0 {
-                self.replace_right(Some(Rc::new(right.rotate_right())))
-                    .rotate_left()
-            } else {
-                self.rotate_left()
             }
         } else {
-            self.clone()
+            let right = self.right.as_ref().unwrap();
+            // right is too heavy.
+            if is_balanced(&Self::size(&self.left), &Self::size(&right.left))
+                && is_balanced(
+                    &(Self::size(&self.left) + Self::size(&right.left) + BigUint::from(1u8)),
+                    &Self::size(&right.right),
+                )
+            {
+                self.rotate_left()
+            } else {
+                self.replace_right(Some(Rc::new(right.rotate_right())))
+                    .rotate_left()
+            }
         };
-        debug_assert!(isize::abs(Self::balance(&res)) < 2);
+        debug_assert!(res.is_balanced());
         res
     }
 
@@ -208,22 +227,21 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
     }
 
     fn join_left_with_insert(left: &Rc<Self>, t: T, h: HashMatrix, right: &Rc<Self>) -> Self {
-        let t_prime = if Self::height(&right.left) > left.height + 1 {
-            Self::join_left_with_insert(left, t, h, right.left.as_ref().unwrap())
+        if is_balanced(&left.size, &right.size) {
+            Self::new(t, h, Some(left.clone()), Some(right.clone()))
         } else {
-            Self::new(t, h, Some(left.clone()), right.left.clone())
-        };
-        right.replace_left(Some(Rc::new(t_prime))).rebalance()
+            let t_prime = Self::join_left_with_insert(left, t, h, right.left.as_ref().unwrap());
+            right.replace_left(Some(Rc::new(t_prime))).rebalance()
+        }
     }
 
     fn join_right_with_insert(left: &Rc<Self>, t: T, h: HashMatrix, right: &Rc<Self>) -> Self {
-        let t_prime = if Self::height(&left.right) > right.height + 1 {
-            Self::join_right_with_insert(left.right.as_ref().unwrap(), t, h, right)
+        if is_balanced(&left.size, &right.size) {
+            Self::new(t, h, Some(left.clone()), Some(right.clone()))
         } else {
-            Self::new(t, h, left.right.clone(), Some(right.clone()))
-        };
-
-        left.replace_right(Some(Rc::new(t_prime))).rebalance()
+            let t_prime = Self::join_right_with_insert(left.right.as_ref().unwrap(), t, h, right);
+            left.replace_right(Some(Rc::new(t_prime))).rebalance()
+        }
     }
 
     fn join_with_insert(
@@ -232,20 +250,19 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
         elem_hash: HashMatrix,
         right: &Rc<Self>,
     ) -> Self {
-        let balance = (left.height as isize) - (right.height as isize);
-        if balance > 1 {
-            // left-weighted
-            Self::join_right_with_insert(left, insertion, elem_hash, right)
-        } else if balance < -1 {
-            // right-weighted
-            Self::join_left_with_insert(left, insertion, elem_hash, right)
-        } else {
+        if is_balanced(&left.size, &right.size) {
             Self::new(
                 insertion,
                 elem_hash,
                 Some(left.clone()),
                 Some(right.clone()),
             )
+        } else if left.size > right.size {
+            // left-weighted
+            Self::join_right_with_insert(left, insertion, elem_hash, right)
+        } else {
+            // right-weighted
+            Self::join_left_with_insert(left, insertion, elem_hash, right)
         }
     }
 
@@ -270,9 +287,9 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
         if self.hash == other.hash {
             return PrefixDiff::Equal;
         }
-
-        let res = match (self.height, other.height) {
-            (1, 1) => PrefixDiff::from_ord(self.elem.cmp(&other.elem)),
+        let one = BigUint::from(1u8);
+        let res = match (&self.size, &other.size) {
+            (a, b) if a == &one && b == &one => PrefixDiff::from_ord(self.elem.cmp(&other.elem)),
             (a, b) if a >= b => {
                 let left_subtree = self.left.as_ref().unwrap();
                 match left_subtree.prefix_diff(other, table) {

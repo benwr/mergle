@@ -124,7 +124,7 @@ quickcheck! {
 }
 
 quickcheck! {
-    fn test_pop(ops : Vec<MergleOp<U8>>, elem : U8) -> TestResult {
+    fn test_pop(ops : Vec<MergleOp<U8>>) -> TestResult {
         match make_mergle(&ops) {
             Some(original) => {
                 let mut orig_values : Vec<U8> = original.iter().collect();
