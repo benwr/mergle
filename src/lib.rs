@@ -86,12 +86,12 @@ impl<T: Clone> PrefixDiff<T> {
 
 #[derive(Clone)]
 pub struct MergleNode<T> {
-    elem: T,
+    pub elem: T,
     elem_hash: HashMatrix,
     height: usize,
     hash: HashMatrix,
-    left: Option<Rc<MergleNode<T>>>,
-    right: Option<Rc<MergleNode<T>>>,
+    pub left: Option<Rc<MergleNode<T>>>,
+    pub right: Option<Rc<MergleNode<T>>>,
 }
 
 impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
