@@ -102,12 +102,28 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
         right: Option<Rc<Self>>,
     ) -> Self {
         MergleNode {
-            elem: elem,
-            elem_hash: elem_hash,
+            elem,
+            elem_hash,
             height: usize::max(Self::height(&left), Self::height(&right)) + 1,
             hash: Self::hash(&left) * elem_hash * Self::hash(&right),
-            left: left,
-            right: right,
+            left,
+            right,
+        }
+    }
+
+    fn create_node_map(self: &Rc<Self>, map: &mut BTreeMap<HashMatrix, Rc<Self>>) {
+        if map.contains_key(&self.hash) {
+            return;
+        } else {
+            map.insert(self.hash, Rc::clone(&self));
+        }
+
+        if let Some(ln) = &self.left {
+            MergleNode::create_node_map(ln, map)
+        }
+
+        if let Some(rn) = &self.right {
+            MergleNode::create_node_map(rn, map)
         }
     }
 
@@ -327,7 +343,7 @@ impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
     pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
         let mut stack = Vec::new();
         stack.push(StackElem::Node(self.root.clone()));
-        Iter { stack: stack }
+        Iter { stack }
     }
 
     #[must_use]
@@ -340,6 +356,12 @@ impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
                 table: self.table.clone(),
             }),
         )
+    }
+
+    pub fn node_map(&self) -> BTreeMap<HashMatrix, Rc<MergleNode<T>>> {
+        let mut map = BTreeMap::new();
+        MergleNode::create_node_map(&self.root, &mut map);
+        map
     }
 }
 
