@@ -15,6 +15,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::cmp::Ordering;
 
+pub use bromberg_sl2;
 use bromberg_sl2::{BrombergHashable, HashMatrix, I};
 
 pub struct MemTableRef<T>(

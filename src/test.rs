@@ -15,7 +15,7 @@ impl BrombergHashable for U8 {
 }
 
 impl Arbitrary for U8 {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+    fn arbitrary(g: &mut Gen) -> Self {
         U8(u8::arbitrary(g))
     }
 }
@@ -27,7 +27,7 @@ enum MergleOp<T> {
 }
 
 impl<T: Arbitrary> Arbitrary for MergleOp<T> {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+    fn arbitrary(g: &mut Gen) -> Self {
         match bool::arbitrary(g) {
             false => MergleOp::Singleton(T::arbitrary(g)),
             true => MergleOp::Merge(usize::arbitrary(g), usize::arbitrary(g)),
