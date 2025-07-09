@@ -18,9 +18,31 @@ use core::cmp::Ordering;
 pub use bromberg_sl2;
 use bromberg_sl2::{BrombergHashable, HashMatrix, I};
 
-pub struct MemTableRef<T>(
-    Rc<RefCell<BTreeMap<(HashMatrix, HashMatrix), PrefixDiff<Rc<MergleNode<T>>>>>>,
-);
+#[derive(Clone)]
+pub enum PrefixDiff<T> {
+    LessThan,
+    PrefixOf(T),
+    Equal,
+    PrefixedBy(T),
+    GreaterThan,
+}
+
+#[derive(Clone)]
+pub struct MergleNode<T> {
+    pub elem: T,
+    elem_hash: HashMatrix,
+    height: usize,
+    hash: HashMatrix,
+    pub left: Option<Rc<MergleNode<T>>>,
+    pub right: Option<Rc<MergleNode<T>>>,
+}
+
+type MergleDiff<T> = PrefixDiff<Rc<MergleNode<T>>>;
+
+type MemoizedDiffTable<T> = BTreeMap<(HashMatrix, HashMatrix), MergleDiff<T>>;
+
+#[derive(Default)]
+pub struct MemTableRef<T>(Rc<RefCell<MemoizedDiffTable<T>>>);
 
 impl<T> Clone for MemTableRef<T> {
     fn clone(&self) -> Self {
@@ -50,19 +72,10 @@ impl<T: Clone> MemTableRef<T> {
             if a > b {
                 table.get(&(b, a)).map(|r| r.reverse())
             } else {
-                table.get(&(a, b)).map(|r| r.clone())
+                table.get(&(a, b)).cloned()
             }
         }
     }
-}
-
-#[derive(Clone)]
-pub enum PrefixDiff<T> {
-    LessThan,
-    PrefixOf(T),
-    Equal,
-    PrefixedBy(T),
-    GreaterThan,
 }
 
 impl<T: Clone> PrefixDiff<T> {
@@ -85,16 +98,6 @@ impl<T: Clone> PrefixDiff<T> {
     }
 }
 
-#[derive(Clone)]
-pub struct MergleNode<T> {
-    pub elem: T,
-    elem_hash: HashMatrix,
-    height: usize,
-    hash: HashMatrix,
-    pub left: Option<Rc<MergleNode<T>>>,
-    pub right: Option<Rc<MergleNode<T>>>,
-}
-
 impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
     fn new(
         elem: T,
@@ -113,10 +116,10 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
     }
 
     fn create_node_map(self: &Rc<Self>, map: &mut BTreeMap<HashMatrix, Rc<Self>>) {
-        if map.contains_key(&self.hash) {
-            return;
+        if let alloc::collections::btree_map::Entry::Vacant(e) = map.entry(self.hash) {
+            e.insert(Rc::clone(self));
         } else {
-            map.insert(self.hash, Rc::clone(&self));
+            return;
         }
 
         if let Some(ln) = &self.left {
@@ -280,7 +283,7 @@ impl<T: BrombergHashable + Ord + Clone> MergleNode<T> {
         }
     }
 
-    fn prefix_diff(self: &Self, other: &Self, table: &MemTableRef<T>) -> PrefixDiff<Rc<Self>> {
+    fn prefix_diff(&self, other: &Self, table: &MemTableRef<T>) -> PrefixDiff<Rc<Self>> {
         if let Some(res) = table.lookup(self.hash, other.hash) {
             return res;
         }
@@ -342,8 +345,8 @@ impl<T: BrombergHashable + Clone + Ord> Mergle<T> {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
-        let mut stack = Vec::new();
-        stack.push(StackElem::Node(self.root.clone()));
+        use alloc::vec;
+        let stack = vec![StackElem::Node(self.root.clone())];
         Iter { stack }
     }
 
